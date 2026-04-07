@@ -51,6 +51,17 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
 
     let manager = state::get_songbird(ctx).await?;
 
+    // Remove stale connection before joining
+    if manager.get(guild_id).is_some() {
+        let call = manager.get(guild_id).unwrap();
+        let current = call.lock().await.current_channel();
+        debug!("Existing voice connection for guild {guild_id}: channel={current:?}");
+        if current.is_none() {
+            info!("Removing stale voice connection for guild {guild_id}");
+            let _ = manager.remove(guild_id).await;
+        }
+    }
+
     // Join if not already in a channel
     if manager.get(guild_id).is_none() {
         info!("Joining voice channel {user_channel} in guild {guild_id}");
@@ -61,6 +72,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
             }
             Err(e) => {
                 error!("Failed to join voice channel {user_channel}: {e:?}");
+                let _ = manager.remove(guild_id).await;
                 return Err(BotError::JoinError(format!("{e:?}")));
             }
         }

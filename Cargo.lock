@@ -3672,7 +3672,7 @@ dependencies = [
 
 [[package]]
 name = "resonance"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "dashmap 6.1.0",
@@ -4392,8 +4392,9 @@ dependencies = [
 
 [[package]]
 name = "songbird"
-version = "0.5.0"
-source = "git+https://github.com/serenity-rs/songbird?branch=next#14174165de616ca09bd12df9f8c0b1be25900279"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b9bf4ecb5083685b79a8fc60222f12e4f036e2817c5c341cd2b9ff2b429d237"
 dependencies = [
  "aead",
  "aes-gcm",

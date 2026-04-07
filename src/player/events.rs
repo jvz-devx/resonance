@@ -159,9 +159,13 @@ pub async fn play_track(
         .ok_or_else(|| "Not in a voice channel".to_string())?;
 
     let mut handler = handler_lock.lock().await;
+    debug!("Voice handler locked for guild {guild_id}, current_channel={:?}", handler.current_channel());
 
+    debug!("Creating YoutubeDl source for: {}", track.url);
     let source = YoutubeDl::new(http_client.clone(), track.url.clone());
+    debug!("Calling play_input for track: {}", track.title);
     let track_handle = handler.play_input(source.into());
+    debug!("Track submitted to driver for guild {guild_id}");
 
     // Register end-of-track event for auto-advance
     if let Err(e) = track_handle.add_event(

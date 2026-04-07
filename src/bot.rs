@@ -7,7 +7,7 @@ use serenity::builder::{
 };
 use serenity::model::application::Command;
 use serenity::model::channel::ReactionType;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::commands;
 use crate::commands::search::emoji_to_index;
@@ -251,11 +251,32 @@ async fn handle_reaction(
 
     let manager = state::get_songbird(ctx).await?;
 
-    if manager.get(guild_id).is_none() {
-        if let Err(e) = manager.join(guild_id, user_channel).await {
-            error!("Failed to join voice: {e}");
-            return Ok(());
+    // Remove stale connection before joining
+    if manager.get(guild_id).is_some() {
+        let call = manager.get(guild_id).unwrap();
+        let current = call.lock().await.current_channel();
+        debug!("Existing voice connection for guild {guild_id}: channel={current:?}");
+        if current.is_none() {
+            debug!("Removing stale voice connection for guild {guild_id}");
+            let _ = manager.remove(guild_id).await;
         }
+    }
+
+    if manager.get(guild_id).is_none() {
+        debug!("Joining voice channel {user_channel} in guild {guild_id} (search selection)");
+        match manager.join(guild_id, user_channel).await {
+            Ok(call) => {
+                let ch = call.lock().await.current_channel();
+                debug!("Voice join succeeded for guild {guild_id}: channel={ch:?}");
+            }
+            Err(e) => {
+                error!("Failed to join voice channel {user_channel} in guild {guild_id}: {e:?}");
+                let _ = manager.remove(guild_id).await;
+                return Ok(());
+            }
+        }
+    } else {
+        debug!("Already in voice channel for guild {guild_id}, skipping join");
     }
 
     // Get shared state
@@ -268,6 +289,7 @@ async fn handle_reaction(
     gs.text_channel_id = Some(channel_id);
 
     if gs.now_playing.is_none() {
+        debug!("Nothing playing in guild {guild_id} — starting playback of: {}", track.title);
         match play_track(
             &manager,
             guild_id,
@@ -283,6 +305,7 @@ async fn handle_reaction(
         .await
         {
             Ok(()) => {
+                debug!("Playback started successfully in guild {guild_id}");
                 if let Some(ref pool) = redis_pool {
                     if let Err(e) = crate::state::redis::save_now_playing(
                         pool,

@@ -9,8 +9,8 @@ repository = "https://github.com/jvz-devx/resonance"
 
 [dependencies]
 serenity = { version = "0.12", features = ["voice", "gateway", "rustls_backend"] }
-# Using git 'next' branch for DAVE/E2EE voice encryption support (required since March 2026)
-songbird = { git = "https://github.com/serenity-rs/songbird", branch = "next", features = ["serenity", "driver", "gateway", "rustls", "builtin-queue"] }
+# Songbird 0.6+ includes DAVE/E2EE voice encryption (required by Discord since March 2026)
+songbird = { version = "0.6", features = ["serenity", "driver", "gateway", "rustls", "builtin-queue"] }
 symphonia = { version = "0.5", features = ["aac", "mp3", "isomp4"] }
 rusty_ytdl = { version = "0.7", default-features = false, features = ["rustls-tls", "search", "blocking"] }
 deadpool-redis = { version = "0.23", features = ["rt_tokio_1"] }
