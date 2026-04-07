@@ -82,4 +82,6 @@ pub fn is_youtube_url(s: &str) -> bool {
         || s.contains("youtu.be/")
         || s.contains("youtube.com/playlist")
         || s.contains("music.youtube.com/watch")
+        || s.contains("youtube.com/shorts/")
+        || s.contains("youtube.com/live/")
 }

@@ -13,8 +13,8 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     let redis_pool = state::get_redis_pool(ctx).await;
     let mut gs = state_lock.lock().await;
 
-    if gs.queue.is_empty() {
-        let embed = embeds::error_embed("The queue is empty, nothing to shuffle.");
+    if gs.queue.len() <= 1 {
+        let embed = embeds::error_embed("Not enough tracks to shuffle.");
         let response = CreateInteractionResponse::Message(
             CreateInteractionResponseMessage::new()
                 .embed(embed)

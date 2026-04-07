@@ -13,6 +13,23 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     let gs = state_lock.lock().await;
 
     if let Some(ref handle) = gs.current_track_handle {
+        let is_paused = handle
+            .get_info()
+            .await
+            .map(|info| info.playing == songbird::tracks::PlayMode::Pause)
+            .unwrap_or(false);
+
+        if is_paused {
+            let embed = embeds::error_embed("Already paused.");
+            let response = CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new()
+                    .embed(embed)
+                    .ephemeral(true),
+            );
+            command.create_response(&ctx.http, response).await?;
+            return Ok(());
+        }
+
         let _ = handle.pause();
         let embed = embeds::success_embed("Paused", "Playback paused.");
         let response = CreateInteractionResponse::Message(

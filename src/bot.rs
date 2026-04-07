@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::commands;
 use crate::commands::search::emoji_to_index;
-use crate::player::events::play_track;
+use crate::player::events::{play_track, PlayContext};
 use crate::queue::track::TrackMetadata;
 use crate::state::{self, get_or_create_guild_state};
 use crate::utils::embeds;
@@ -168,19 +168,19 @@ async fn handle_reaction(
     };
 
     let pending_data = {
-        if let Some(entry) = pending_searches.get(&reaction.message_id) {
-            let search = entry.value();
-
+        if let Some((_, search)) = pending_searches.remove(&reaction.message_id) {
             // Verify it's the right user and not expired
             if search.user_id != reactor_id {
+                // Not our user — put it back
+                pending_searches.insert(reaction.message_id, search);
                 return Ok(());
             }
             if search.expires_at < Instant::now() {
-                drop(entry);
-                pending_searches.remove(&reaction.message_id);
                 return Ok(());
             }
             if index >= search.results.len() {
+                // Out of bounds — put it back
+                pending_searches.insert(reaction.message_id, search);
                 return Ok(());
             }
 
@@ -198,9 +198,6 @@ async fn handle_reaction(
         Some(data) => data,
         None => return Ok(()),
     };
-
-    // Remove from pending
-    pending_searches.remove(&reaction.message_id);
 
     info!(
         "Search selection: {} chose '{}' in guild {}",
@@ -249,8 +246,7 @@ async fn handle_reaction(
     let manager = state::get_songbird(ctx).await?;
 
     // Remove stale connection before joining
-    if manager.get(guild_id).is_some() {
-        let call = manager.get(guild_id).unwrap();
+    if let Some(call) = manager.get(guild_id) {
         let current = call.lock().await.current_channel();
         debug!("Existing voice connection for guild {guild_id}: channel={current:?}");
         if current.is_none() {
@@ -287,19 +283,15 @@ async fn handle_reaction(
 
     if gs.now_playing.is_none() {
         debug!("Nothing playing in guild {guild_id} — starting playback of: {}", track.title);
-        match play_track(
-            &manager,
+        let play_ctx = PlayContext {
+            manager: manager.clone(),
             guild_id,
-            &track,
-            &http_client,
-            &mut gs,
-            guild_state_arc.clone(),
-            manager.clone(),
-            http_client.clone(),
-            ctx.http.clone(),
-            redis_pool.clone(),
-        )
-        .await
+            guild_state: guild_state_arc.clone(),
+            http_client: http_client.clone(),
+            discord_http: ctx.http.clone(),
+            redis_pool: redis_pool.clone(),
+        };
+        match play_track(&play_ctx, &track, &mut gs).await
         {
             Ok(()) => {
                 debug!("Playback started successfully in guild {guild_id}");
@@ -408,6 +400,8 @@ fn spawn_auto_disconnect(ctx: Context) {
                 }
             }
 
+            let redis_pool = state::get_redis_pool(&ctx).await;
+
             for guild_id in guilds_to_leave {
                 let _ = manager.remove(guild_id).await;
 
@@ -417,6 +411,15 @@ fn spawn_auto_disconnect(ctx: Context) {
                     gs.queue.clear();
                     gs.now_playing = None;
                     gs.current_track_handle = None;
+                }
+
+                // Remove from DashMap to prevent memory leak
+                guild_states.remove(&guild_id);
+
+                // Clear Redis data
+                if let Some(ref pool) = redis_pool {
+                    let _ = crate::state::redis::save_queue(pool, guild_id.get(), &[]).await;
+                    let _ = crate::state::redis::save_now_playing(pool, guild_id.get(), None).await;
                 }
             }
         }

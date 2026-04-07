@@ -4,7 +4,7 @@ use serenity::builder::{
 };
 use tracing::{debug, error, info};
 
-use crate::player::events::play_track;
+use crate::player::events::{play_track, PlayContext};
 use crate::queue::track::TrackMetadata;
 use crate::state::{self, get_or_create_guild_state};
 use crate::utils::embeds;
@@ -52,8 +52,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     let manager = state::get_songbird(ctx).await?;
 
     // Remove stale connection before joining
-    if manager.get(guild_id).is_some() {
-        let call = manager.get(guild_id).unwrap();
+    if let Some(call) = manager.get(guild_id) {
         let current = call.lock().await.current_channel();
         debug!("Existing voice connection for guild {guild_id}: channel={current:?}");
         if current.is_none() {
@@ -114,19 +113,15 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     if gs.now_playing.is_none() {
         info!("Nothing playing — starting playback of: {}", track.title);
         // Nothing playing — start playing now
-        match play_track(
-            &manager,
+        let play_ctx = PlayContext {
+            manager: manager.clone(),
             guild_id,
-            &track,
-            &http_client,
-            &mut gs,
-            guild_state_arc.clone(),
-            manager.clone(),
-            http_client.clone(),
-            ctx.http.clone(),
-            redis_pool.clone(),
-        )
-        .await
+            guild_state: guild_state_arc.clone(),
+            http_client: http_client.clone(),
+            discord_http: ctx.http.clone(),
+            redis_pool: redis_pool.clone(),
+        };
+        match play_track(&play_ctx, &track, &mut gs).await
         {
             Ok(()) => info!("Playback started successfully"),
             Err(e) => {

@@ -14,7 +14,8 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         .into_iter()
         .find(|o| o.name == "position")
         .and_then(|o| match o.value {
-            ResolvedValue::Integer(i) => Some(i as usize),
+            ResolvedValue::Integer(i) if i > 0 => Some(i as usize),
+            ResolvedValue::Integer(_) => None,
             _ => None,
         })
         .ok_or(BotError::Other("Missing position argument".into()))?;
@@ -41,7 +42,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         command.create_response(&ctx.http, response).await?;
     } else {
         let embed = embeds::error_embed(&format!(
-            "Invalid position {position}. Queue has {} tracks.",
+            "Position must be between 1 and {}.",
             gs.queue.len()
         ));
         let response = CreateInteractionResponse::Message(

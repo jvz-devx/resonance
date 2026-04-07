@@ -30,10 +30,17 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     {
         let guild_states = state::get_guild_states(ctx).await?;
         let state_lock = get_or_create_guild_state(&guild_states, guild_id);
+        let redis_pool = state::get_redis_pool(ctx).await;
         let mut gs = state_lock.lock().await;
         gs.queue.clear();
         gs.now_playing = None;
         gs.current_track_handle = None;
+
+        // Persist cleared state to Redis
+        if let Some(ref pool) = redis_pool {
+            let _ = crate::state::redis::save_queue(pool, guild_id.get(), &[]).await;
+            let _ = crate::state::redis::save_now_playing(pool, guild_id.get(), None).await;
+        }
     }
 
     let embed = embeds::success_embed("Disconnected", "Left the voice channel.");

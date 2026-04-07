@@ -11,6 +11,7 @@ services:
       - pot-server
     restart: unless-stopped
 
+  # Redis for queue persistence (optional — bot works without it, just loses queue on restart)
   redis:
     image: redis:7-alpine
     volumes:

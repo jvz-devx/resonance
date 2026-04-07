@@ -1,5 +1,6 @@
 use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::Pool;
+use tracing::warn;
 
 use crate::queue::track::TrackMetadata;
 use crate::state::LoopMode;
@@ -37,7 +38,13 @@ pub async fn save_queue(pool: &Pool, guild_id: u64, tracks: &[TrackMetadata]) ->
     if !tracks.is_empty() {
         let serialized: Vec<String> = tracks
             .iter()
-            .filter_map(|t| serde_json::to_string(t).ok())
+            .filter_map(|t| match serde_json::to_string(t) {
+                Ok(json) => Some(json),
+                Err(e) => {
+                    warn!("Failed to serialize track for Redis queue: {e}");
+                    None
+                }
+            })
             .collect();
 
         let _: () = conn.rpush(&key, serialized).await?;
@@ -56,7 +63,13 @@ pub async fn load_queue(pool: &Pool, guild_id: u64) -> BotResult<Vec<TrackMetada
 
     let tracks: Vec<TrackMetadata> = items
         .iter()
-        .filter_map(|s| serde_json::from_str(s).ok())
+        .filter_map(|s| match serde_json::from_str(s) {
+            Ok(track) => Some(track),
+            Err(e) => {
+                warn!("Failed to deserialize track from Redis: {e}");
+                None
+            }
+        })
         .collect();
 
     Ok(tracks)
@@ -93,7 +106,13 @@ pub async fn load_now_playing(pool: &Pool, guild_id: u64) -> BotResult<Option<Tr
 
     let json: Option<String> = conn.get(&key).await?;
 
-    Ok(json.and_then(|s| serde_json::from_str(&s).ok()))
+    Ok(json.and_then(|s| match serde_json::from_str(&s) {
+        Ok(track) => Some(track),
+        Err(e) => {
+            warn!("Failed to deserialize now_playing from Redis: {e}");
+            None
+        }
+    }))
 }
 
 /// Save guild settings (loop mode, etc.)
@@ -143,7 +162,13 @@ pub async fn load_history(pool: &Pool, guild_id: u64) -> BotResult<Vec<TrackMeta
 
     let tracks: Vec<TrackMetadata> = items
         .iter()
-        .filter_map(|s| serde_json::from_str(s).ok())
+        .filter_map(|s| match serde_json::from_str(s) {
+            Ok(track) => Some(track),
+            Err(e) => {
+                warn!("Failed to deserialize track from Redis history: {e}");
+                None
+            }
+        })
         .collect();
 
     Ok(tracks)
