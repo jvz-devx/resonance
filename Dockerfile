@@ -17,15 +17,19 @@ FROM alpine:3.21
 
 LABEL org.opencontainers.image.source=https://github.com/jvz-devx/resonance
 
-RUN apk add --no-cache opus ffmpeg python3 py3-pip ca-certificates \
-    && pip3 install --break-system-packages yt-dlp bgutil-ytdlp-pot-provider
+RUN apk add --no-cache opus ffmpeg python3 py3-pip ca-certificates curl \
+    && pip3 install --break-system-packages yt-dlp bgutil-ytdlp-pot-provider \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
-# yt-dlp config: use the PO token server sidecar
-RUN printf '%s\n' '--extractor-args' 'youtubepot-bgutilhttp:base_url=http://pot-server:4416' \
-    > /etc/yt-dlp.conf
+# Default PO token server URL (override via env var)
+ENV POT_SERVER_URL=http://pot-server:4416
+
+# yt-dlp config generated at container start from env var
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 COPY --from=builder /app/target/release/resonance /usr/local/bin/resonance
 
 ENV RUST_LOG=info,resonance=debug
 
-CMD ["resonance"]
+ENTRYPOINT ["entrypoint.sh"]
