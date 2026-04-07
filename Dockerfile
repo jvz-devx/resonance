@@ -21,24 +21,21 @@ COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
 RUN cargo build --release
 
-# Stage 5: Runtime
+# Stage 5: yt-dlp with built-in PO token provider
+FROM ghcr.io/jim60105/yt-dlp:pot AS ytdlp
+
+# Stage 6: Final runtime
 FROM alpine:3.21
 
 LABEL org.opencontainers.image.source=https://github.com/jvz-devx/resonance
 
-RUN apk add --no-cache opus ffmpeg python3 py3-pip ca-certificates curl \
-    && pip3 install --break-system-packages yt-dlp bgutil-ytdlp-pot-provider \
-    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+RUN apk add --no-cache opus ffmpeg ca-certificates
 
-# Default PO token server URL (override via env var)
-ENV POT_SERVER_URL=http://pot-server:4416
-
-# yt-dlp config generated at container start from env var
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+# yt-dlp binary with Rust-based PO token provider (no Python/Node/Deno needed)
+COPY --from=ytdlp /usr/bin/yt-dlp /usr/local/bin/yt-dlp
 
 COPY --from=builder /app/target/release/resonance /usr/local/bin/resonance
 
 ENV RUST_LOG=info,resonance=debug
 
-ENTRYPOINT ["entrypoint.sh"]
+CMD ["resonance"]
