@@ -31,8 +31,10 @@ LABEL org.opencontainers.image.source=https://github.com/jvz-devx/resonance
 
 RUN apk add --no-cache opus ffmpeg ca-certificates
 
-# yt-dlp binary with Rust-based PO token provider (no Python/Node/Deno needed)
+# yt-dlp binary + bgutil-pot CLI + plugin files (no Python/Node needed)
 COPY --from=ytdlp /usr/bin/yt-dlp /usr/local/bin/yt-dlp
+COPY --from=ytdlp /usr/bin/bgutil-pot /usr/local/bin/bgutil-pot
+COPY --from=ytdlp /etc/yt-dlp-plugins /etc/yt-dlp-plugins
 
 COPY --from=builder /app/target/release/resonance /usr/local/bin/resonance
 
