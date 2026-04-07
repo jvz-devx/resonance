@@ -1,9 +1,14 @@
 services:
+  pot-server:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: unless-stopped
+
   bot:
     build: .
     env_file: .env
     depends_on:
       - redis
+      - pot-server
     restart: unless-stopped
 
   redis:
