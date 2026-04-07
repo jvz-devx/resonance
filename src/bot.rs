@@ -63,12 +63,9 @@ impl EventHandler for Handler {
             }
         }
 
-        // Also register globally (takes up to 1 hour to propagate)
-        match Command::set_global_commands(&ctx.http, commands_to_register).await {
-            Ok(cmds) => {
-                info!("Registered {} global slash commands", cmds.len());
-            }
-            Err(e) => error!("Failed to register global slash commands: {e}"),
+        // Clear any stale global commands (guild commands are sufficient)
+        if let Err(e) = Command::set_global_commands(&ctx.http, Vec::new()).await {
+            warn!("Failed to clear global slash commands: {e}");
         }
 
         // Spawn background tasks
