@@ -29,12 +29,15 @@ FROM alpine:3.21
 
 LABEL org.opencontainers.image.source=https://github.com/jvz-devx/resonance
 
-RUN apk add --no-cache opus ffmpeg ca-certificates
+RUN apk add --no-cache opus ffmpeg ca-certificates nodejs
 
 # yt-dlp binary + bgutil-pot CLI + plugin files (no Python/Node needed)
 COPY --from=ytdlp /usr/bin/yt-dlp /usr/local/bin/yt-dlp
 COPY --from=ytdlp /usr/bin/bgutil-pot /usr/local/bin/bgutil-pot
 COPY --from=ytdlp /etc/yt-dlp-plugins /etc/yt-dlp-plugins
+
+# Enable Node.js as JS runtime for yt-dlp (required for YouTube player JS)
+RUN mkdir -p /etc && echo "--js-runtimes node" > /etc/yt-dlp.conf
 
 COPY --from=builder /app/target/release/resonance /usr/local/bin/resonance
 
