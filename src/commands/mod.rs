@@ -2,6 +2,7 @@ pub mod clear;
 pub mod join;
 pub mod leave;
 pub mod loop_cmd;
+pub mod normalize;
 pub mod nowplaying;
 pub mod pause;
 pub mod play;
@@ -79,6 +80,17 @@ pub fn all_commands() -> Vec<CreateCommand> {
             ),
         CreateCommand::new("clear")
             .description("Clear the queue (keeps the current track playing)"),
+        CreateCommand::new("normalize")
+            .description("Toggle sound normalisation (on by default)")
+            .add_option(
+                CreateCommandOption::new(
+                    CommandOptionType::String,
+                    "enabled",
+                    "Turn normalisation on or off (toggles if omitted)",
+                )
+                .add_string_choice("On", "on")
+                .add_string_choice("Off", "off"),
+            ),
         CreateCommand::new("join")
             .description("Join your voice channel"),
         CreateCommand::new("leave")

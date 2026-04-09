@@ -13,7 +13,7 @@ use crate::commands;
 use crate::commands::search::emoji_to_index;
 use crate::player::events::{play_track, PlayContext};
 use crate::queue::track::TrackMetadata;
-use crate::state::{self, get_or_create_guild_state};
+use crate::state;
 use crate::utils::embeds;
 
 pub struct Handler;
@@ -92,6 +92,7 @@ impl EventHandler for Handler {
                 "nowplaying" => commands::nowplaying::run(&ctx, &command).await,
                 "shuffle" => commands::shuffle::run(&ctx, &command).await,
                 "loop" => commands::loop_cmd::run(&ctx, &command).await,
+                "normalize" => commands::normalize::run(&ctx, &command).await,
                 "remove" => commands::remove::run(&ctx, &command).await,
                 "clear" => commands::clear::run(&ctx, &command).await,
                 "join" => commands::join::run(&ctx, &command).await,
@@ -273,8 +274,7 @@ async fn handle_reaction(
     }
 
     // Get shared state
-    let guild_states = state::get_guild_states(ctx).await?;
-    let guild_state_arc = get_or_create_guild_state(&guild_states, guild_id);
+    let guild_state_arc = state::get_or_load_guild_state(ctx, guild_id).await?;
     let http_client = state::get_http_client(ctx).await?;
     let redis_pool = state::get_redis_pool(ctx).await;
 

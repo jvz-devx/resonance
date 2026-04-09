@@ -1,7 +1,7 @@
 use serenity::all::{CommandInteraction, Context};
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
 
-use crate::state::{self, get_or_create_guild_state};
+use crate::state;
 use crate::utils::embeds;
 use crate::utils::error::{BotError, BotResult};
 
@@ -28,8 +28,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
 
     // Clear guild state
     {
-        let guild_states = state::get_guild_states(ctx).await?;
-        let state_lock = get_or_create_guild_state(&guild_states, guild_id);
+        let state_lock = state::get_or_load_guild_state(ctx, guild_id).await?;
         let redis_pool = state::get_redis_pool(ctx).await;
         let mut gs = state_lock.lock().await;
         gs.queue.clear();

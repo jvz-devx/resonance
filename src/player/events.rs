@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serenity::all::Http;
 use serenity::model::id::GuildId;
 use songbird::events::{Event, EventContext, EventHandler as SongbirdEventHandler, TrackEvent};
-use songbird::input::YoutubeDl;
+use songbird::input::{Input, YoutubeDl};
 use songbird::Songbird;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
@@ -196,10 +196,18 @@ pub async fn play_track(
     let mut handler = handler_lock.lock().await;
     debug!("Voice handler locked for guild {}, current_channel={:?}", ctx.guild_id, handler.current_channel());
 
-    debug!("Creating YoutubeDl source for: {}", track.url);
-    let source = YoutubeDl::new(ctx.http_client.clone(), track.url.clone());
+    let input: Input = if state.normalize {
+        debug!("Creating normalized source for: {}", track.url);
+        super::normalized_source::create_normalized_source(&track.url)
+            .await
+            .map_err(|e| format!("Normalized source failed: {e}"))?
+    } else {
+        debug!("Creating YoutubeDl source for: {}", track.url);
+        YoutubeDl::new(ctx.http_client.clone(), track.url.clone()).into()
+    };
+
     debug!("Calling play_input for track: {}", track.title);
-    let track_handle = handler.play_input(source.into());
+    let track_handle = handler.play_input(input);
     debug!("Track submitted to driver for guild {}", ctx.guild_id);
 
     // Register end-of-track event for auto-advance

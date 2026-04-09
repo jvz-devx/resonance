@@ -1,15 +1,14 @@
 use serenity::all::{CommandInteraction, Context};
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
 
-use crate::state::{self, get_or_create_guild_state};
+use crate::state;
 use crate::utils::embeds;
 use crate::utils::error::{BotError, BotResult};
 
 pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     let guild_id = command.guild_id.ok_or(BotError::NotInGuild)?;
 
-    let guild_states = state::get_guild_states(ctx).await?;
-    let state_lock = get_or_create_guild_state(&guild_states, guild_id);
+    let state_lock = state::get_or_load_guild_state(ctx, guild_id).await?;
     let gs = state_lock.lock().await;
 
     if gs.now_playing.is_none() {

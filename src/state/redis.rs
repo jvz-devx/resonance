@@ -3,7 +3,7 @@ use deadpool_redis::Pool;
 use tracing::warn;
 
 use crate::queue::track::TrackMetadata;
-use crate::state::LoopMode;
+use crate::state::{LoopMode, DEFAULT_NORMALIZE};
 use crate::utils::error::{BotError, BotResult};
 
 const KEY_PREFIX: &str = "musicbot";
@@ -115,28 +115,50 @@ pub async fn load_now_playing(pool: &Pool, guild_id: u64) -> BotResult<Option<Tr
     }))
 }
 
-/// Save guild settings (loop mode, etc.)
-pub async fn save_settings(pool: &Pool, guild_id: u64, loop_mode: &LoopMode) -> BotResult<()> {
+/// Save only the loop_mode field
+pub async fn save_loop_mode(pool: &Pool, guild_id: u64, loop_mode: &LoopMode) -> BotResult<()> {
     let mut conn = pool.get().await?;
     let key = settings_key(guild_id);
-
     let _: () = conn.hset(&key, "loop_mode", loop_mode.to_string()).await?;
-
     Ok(())
 }
 
-#[allow(dead_code)]
-/// Load guild settings
-pub async fn load_loop_mode(pool: &Pool, guild_id: u64) -> BotResult<LoopMode> {
+/// Save only the normalize field
+pub async fn save_normalize(pool: &Pool, guild_id: u64, normalize: bool) -> BotResult<()> {
+    let mut conn = pool.get().await?;
+    let key = settings_key(guild_id);
+    let _: () = conn.hset(&key, "normalize", normalize.to_string()).await?;
+    Ok(())
+}
+
+/// Guild settings loaded from Redis in a single round trip.
+pub struct GuildSettings {
+    pub loop_mode: LoopMode,
+    pub normalize: bool,
+}
+
+/// Load all guild settings in a single HGETALL round trip.
+/// Missing or invalid fields fall back to defaults.
+pub async fn load_settings(pool: &Pool, guild_id: u64) -> BotResult<GuildSettings> {
     let mut conn = pool.get().await?;
     let key = settings_key(guild_id);
 
-    let mode: Option<String> = conn.hget(&key, "loop_mode").await?;
+    let fields: std::collections::HashMap<String, String> = conn.hgetall(&key).await?;
 
-    // Default to LoopMode::Off if no setting stored or unrecognized value
-    Ok(mode
-        .and_then(|s| LoopMode::from_str(&s))
-        .unwrap_or(LoopMode::Off))
+    let loop_mode = fields
+        .get("loop_mode")
+        .and_then(|s| LoopMode::from_str(s))
+        .unwrap_or(LoopMode::Off);
+
+    let normalize = fields
+        .get("normalize")
+        .and_then(|s| s.parse::<bool>().ok())
+        .unwrap_or(DEFAULT_NORMALIZE);
+
+    Ok(GuildSettings {
+        loop_mode,
+        normalize,
+    })
 }
 
 /// Add a track to play history (capped at 100)

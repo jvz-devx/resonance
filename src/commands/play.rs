@@ -6,7 +6,7 @@ use tracing::{debug, error, info};
 
 use crate::player::events::{play_track, PlayContext};
 use crate::queue::track::TrackMetadata;
-use crate::state::{self, get_or_create_guild_state};
+use crate::state;
 use crate::utils::embeds;
 use crate::utils::error::{BotError, BotResult};
 use crate::youtube::search;
@@ -102,8 +102,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     );
 
     // Get shared state
-    let guild_states = state::get_guild_states(ctx).await?;
-    let guild_state_arc = get_or_create_guild_state(&guild_states, guild_id);
+    let guild_state_arc = state::get_or_load_guild_state(ctx, guild_id).await?;
     let http_client = state::get_http_client(ctx).await?;
     let redis_pool = state::get_redis_pool(ctx).await;
 
