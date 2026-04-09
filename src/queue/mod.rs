@@ -71,7 +71,9 @@ impl QueueManager {
         self.tracks.len()
     }
 
-    /// Whether the queue is empty.
+    #[allow(dead_code)]
+    /// Whether the queue is empty. Paired with `len()` to satisfy clippy's
+    /// `len_without_is_empty` lint; kept public for future use.
     pub fn is_empty(&self) -> bool {
         self.tracks.is_empty()
     }

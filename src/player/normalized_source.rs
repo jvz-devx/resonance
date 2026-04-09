@@ -45,15 +45,20 @@ pub async fn create_normalized_source(url: &str) -> BotResult<Input> {
     // Build a SINGLE -headers string (ffmpeg only honors the last one).
     // Headers must come BEFORE -i. Same for -reconnect flags.
     //
-    // Googlevideo CDN drops long-lived TLS connections mid-stream; without
-    // these flags ffmpeg surfaces an I/O error and the track ends early.
+    // Googlevideo CDN drops long-lived TLS connections mid-stream with
+    // "Connection reset by peer"; without these flags ffmpeg surfaces an
+    // I/O error and the track ends early. Notes:
+    // - reconnect_on_network_error handles TCP/TLS errors (our case)
+    // - reconnect_streamed is required for non-seekable HTTP streams
+    // - reconnect_at_eof is intentionally OMITTED because it would loop
+    //   forever at the natural end of a finite track
     let mut ffmpeg_args: Vec<String> = vec![
         "-nostdin".to_string(),
         "-reconnect".to_string(),
         "1".to_string(),
-        "-reconnect_at_eof".to_string(),
-        "1".to_string(),
         "-reconnect_streamed".to_string(),
+        "1".to_string(),
+        "-reconnect_on_network_error".to_string(),
         "1".to_string(),
         "-reconnect_delay_max".to_string(),
         "5".to_string(),
