@@ -29,9 +29,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         .ok_or(BotError::Other("Missing query argument".into()))?;
 
     // Defer the response
-    let defer = CreateInteractionResponse::Defer(
-        CreateInteractionResponseMessage::new(),
-    );
+    let defer = CreateInteractionResponse::Defer(CreateInteractionResponseMessage::new());
     command.create_response(&ctx.http, defer).await?;
 
     // Search YouTube

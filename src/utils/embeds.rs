@@ -33,7 +33,8 @@ pub fn now_playing_embed(track: &TrackMetadata) -> CreateEmbed {
         .title("Now Playing")
         .description(format!(
             "**[{}]({})**",
-            escape_markdown(&track.title), track.url
+            escape_markdown(&track.title),
+            track.url
         ))
         .color(COLOR_PRIMARY)
         .field(
@@ -58,7 +59,8 @@ pub fn added_to_queue_embed(track: &TrackMetadata, position: usize) -> CreateEmb
         .title("Added to Queue")
         .description(format!(
             "**[{}]({})**",
-            escape_markdown(&track.title), track.url
+            escape_markdown(&track.title),
+            track.url
         ))
         .color(COLOR_SUCCESS)
         .field("Position", format!("#{position}"), true)
@@ -135,18 +137,21 @@ pub fn queue_embed(
         )))
 }
 
-pub fn search_results_embed(results: &[(String, String, Option<std::time::Duration>)]) -> CreateEmbed {
+pub fn search_results_embed(
+    results: &[(String, String, Option<std::time::Duration>)],
+) -> CreateEmbed {
     let mut description = String::new();
-    let emojis = ["1\u{fe0f}\u{20e3}", "2\u{fe0f}\u{20e3}", "3\u{fe0f}\u{20e3}"];
+    let emojis = [
+        "1\u{fe0f}\u{20e3}",
+        "2\u{fe0f}\u{20e3}",
+        "3\u{fe0f}\u{20e3}",
+    ];
 
     for (i, (title, _url, duration)) in results.iter().enumerate() {
         let dur_str = duration
             .map(|d| format_duration(d))
             .unwrap_or_else(|| "Live".into());
-        description.push_str(&format!(
-            "{} **{}** | `{}`\n\n",
-            emojis[i], title, dur_str
-        ));
+        description.push_str(&format!("{} **{}** | `{}`\n\n", emojis[i], title, dur_str));
     }
 
     description.push_str("\n*React with a number to select a track. Expires in 30 seconds.*");

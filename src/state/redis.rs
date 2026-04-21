@@ -1,9 +1,9 @@
-use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::Pool;
+use deadpool_redis::redis::AsyncCommands;
 use tracing::warn;
 
 use crate::queue::track::TrackMetadata;
-use crate::state::{LoopMode, DEFAULT_NORMALIZE};
+use crate::state::{DEFAULT_NORMALIZE, LoopMode};
 use crate::utils::error::{BotError, BotResult};
 
 const KEY_PREFIX: &str = "musicbot";

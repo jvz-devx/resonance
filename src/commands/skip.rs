@@ -34,9 +34,8 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     }
 
     let embed = embeds::success_embed("Skipped", &format!("Skipped **{skipped_title}**"));
-    let response = CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new().embed(embed),
-    );
+    let response =
+        CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed));
     command.create_response(&ctx.http, response).await?;
 
     Ok(())

@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::commands;
 use crate::commands::search::emoji_to_index;
-use crate::player::events::{play_track, PlayContext};
+use crate::player::events::{PlayContext, play_track};
 use crate::queue::track::TrackMetadata;
 use crate::state;
 use crate::utils::embeds;
@@ -56,10 +56,7 @@ impl EventHandler for Handler {
                         guild.id
                     );
                 }
-                Err(e) => error!(
-                    "Failed to register guild commands for {}: {e}",
-                    guild.id
-                ),
+                Err(e) => error!("Failed to register guild commands for {}: {e}", guild.id),
             }
         }
 
@@ -282,7 +279,10 @@ async fn handle_reaction(
     gs.text_channel_id = Some(channel_id);
 
     if gs.now_playing.is_none() {
-        debug!("Nothing playing in guild {guild_id} — starting playback of: {}", track.title);
+        debug!(
+            "Nothing playing in guild {guild_id} — starting playback of: {}",
+            track.title
+        );
         let play_ctx = PlayContext {
             manager: manager.clone(),
             guild_id,
@@ -291,8 +291,7 @@ async fn handle_reaction(
             discord_http: ctx.http.clone(),
             redis_pool: redis_pool.clone(),
         };
-        match play_track(&play_ctx, &track, &mut gs).await
-        {
+        match play_track(&play_ctx, &track, &mut gs).await {
             Ok(()) => {
                 debug!("Playback started successfully in guild {guild_id}");
                 if let Some(ref pool) = redis_pool {
@@ -313,7 +312,7 @@ async fn handle_reaction(
             Err(e) => {
                 error!("Failed to play selected track: {e}");
                 let _ = channel_id
-                    .say(&ctx.http, format!("Failed to play: {e}"))
+                    .say(&ctx.http, format!("Failed to play: {}", e.user_message()))
                     .await;
             }
         }
@@ -332,8 +331,10 @@ async fn handle_reaction(
 
     // Edit original search message to show selection
     if let Ok(mut msg) = ctx.http.get_message(channel_id, reaction.message_id).await {
-        let edit = serenity::builder::EditMessage::new()
-            .embed(embeds::success_embed("Selected", &format!("Playing **{title}**")));
+        let edit = serenity::builder::EditMessage::new().embed(embeds::success_embed(
+            "Selected",
+            &format!("Playing **{title}**"),
+        ));
         let _ = msg.edit(&ctx.http, edit).await;
     }
 

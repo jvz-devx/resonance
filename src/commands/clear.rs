@@ -21,14 +21,16 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     }
 
     let embed = if count > 0 {
-        embeds::success_embed("Cleared", &format!("Removed {count} tracks from the queue."))
+        embeds::success_embed(
+            "Cleared",
+            &format!("Removed {count} tracks from the queue."),
+        )
     } else {
         embeds::success_embed("Cleared", "The queue was already empty.")
     };
 
-    let response = CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new().embed(embed),
-    );
+    let response =
+        CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed));
     command.create_response(&ctx.http, response).await?;
 
     Ok(())

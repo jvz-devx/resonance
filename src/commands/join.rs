@@ -41,9 +41,8 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         &format!("Connected to <#{}>", channel_id),
     );
 
-    let response = CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new().embed(embed),
-    );
+    let response =
+        CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed));
     command.create_response(&ctx.http, response).await?;
 
     Ok(())

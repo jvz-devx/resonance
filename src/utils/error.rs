@@ -17,6 +17,18 @@ pub enum BotError {
     NoResults,
     #[error("Failed to play audio: {0}")]
     PlayFailed(String),
+    #[error("yt-dlp could not extract a playable stream: {0}")]
+    ExtractorFailed(String),
+    #[error("YouTube blocked the request with an anti-bot challenge")]
+    AntiBotChallenge,
+    #[error("YouTube is rate-limiting requests")]
+    RateLimited,
+    #[error("The media server rejected the stream URL")]
+    MediaForbidden,
+    #[error("ffmpeg setup failed: {0}")]
+    FfmpegSetupFailed(String),
+    #[error("Stream network failure: {0}")]
+    StreamNetwork(String),
     #[error("Internal state missing: {0}")]
     StateMissing(String),
     #[error("Redis error: {0}")]
@@ -46,6 +58,21 @@ impl BotError {
             Self::SearchFailed(e) => format!("YouTube search failed: {e}"),
             Self::NoResults => "No results found for your search.".into(),
             Self::PlayFailed(e) => format!("Failed to play: {e}"),
+            Self::ExtractorFailed(_) => {
+                "yt-dlp could not extract a playable stream for this track.".into()
+            }
+            Self::AntiBotChallenge => {
+                "YouTube blocked this request. Verify the POT server is reachable and try again."
+                    .into()
+            }
+            Self::RateLimited => {
+                "YouTube is rate-limiting playback right now. Try again in a few minutes.".into()
+            }
+            Self::MediaForbidden => {
+                "The media server rejected the stream URL. Try again shortly.".into()
+            }
+            Self::FfmpegSetupFailed(_) => "ffmpeg could not start playback for this track.".into(),
+            Self::StreamNetwork(_) => "The stream connection dropped during playback.".into(),
             _ => format!("An error occurred: {self}"),
         }
     }

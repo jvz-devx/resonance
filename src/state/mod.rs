@@ -10,8 +10,8 @@ use serenity::prelude::TypeMapKey;
 use songbird::tracks::TrackHandle;
 use tokio::sync::Mutex;
 
-use crate::queue::track::TrackMetadata;
 use crate::queue::QueueManager;
+use crate::queue::track::TrackMetadata;
 
 pub const DEFAULT_NORMALIZE: bool = true;
 

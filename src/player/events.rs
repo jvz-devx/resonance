@@ -2,15 +2,17 @@ use std::sync::Arc;
 
 use serenity::all::Http;
 use serenity::model::id::GuildId;
+use songbird::Songbird;
 use songbird::events::{Event, EventContext, EventHandler as SongbirdEventHandler, TrackEvent};
 use songbird::input::{Input, YoutubeDl};
-use songbird::Songbird;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
+use crate::player::media_tools::{build_ytdlp_user_args, classify_media_error};
 use crate::queue::track::TrackMetadata;
 use crate::state::{GuildState, LoopMode};
 use crate::utils::embeds;
+use crate::utils::error::{BotError, BotResult};
 
 /// Shared context for playing tracks, avoiding long parameter lists
 pub struct PlayContext {
@@ -77,7 +79,10 @@ impl SongbirdEventHandler for TrackEndHandler {
             // Save finished track to history
             if let Some(ref pool) = self.ctx.redis_pool {
                 if let Some(ref finished) = state.now_playing {
-                    if let Err(e) = crate::state::redis::add_to_history(pool, self.ctx.guild_id.get(), finished).await {
+                    if let Err(e) =
+                        crate::state::redis::add_to_history(pool, self.ctx.guild_id.get(), finished)
+                            .await
+                    {
                         warn!("Failed to save track to history: {e}");
                     }
                 }
@@ -90,9 +95,16 @@ impl SongbirdEventHandler for TrackEndHandler {
 
                 // Notify text channel about the failure
                 if let Some(channel_id) = state.text_channel_id {
-                    let embed = embeds::error_embed(&format!("Failed to play **{}**: {e}", next_track.title));
+                    let embed = embeds::error_embed(&format!(
+                        "Failed to play **{}**. {}",
+                        next_track.title,
+                        e.user_message()
+                    ));
                     let builder = serenity::builder::CreateMessage::new().embed(embed);
-                    if let Err(e) = channel_id.send_message(&self.ctx.discord_http, builder).await {
+                    if let Err(e) = channel_id
+                        .send_message(&self.ctx.discord_http, builder)
+                        .await
+                    {
                         warn!("Failed to send error message: {e}");
                     }
                 }
@@ -101,10 +113,18 @@ impl SongbirdEventHandler for TrackEndHandler {
             // Persist queue changes
             if let Some(ref pool) = self.ctx.redis_pool {
                 let tracks: Vec<_> = state.queue.tracks.iter().cloned().collect();
-                if let Err(e) = crate::state::redis::save_queue(pool, self.ctx.guild_id.get(), &tracks).await {
+                if let Err(e) =
+                    crate::state::redis::save_queue(pool, self.ctx.guild_id.get(), &tracks).await
+                {
                     warn!("Failed to persist queue to Redis: {e}");
                 }
-                if let Err(e) = crate::state::redis::save_now_playing(pool, self.ctx.guild_id.get(), state.now_playing.as_ref()).await {
+                if let Err(e) = crate::state::redis::save_now_playing(
+                    pool,
+                    self.ctx.guild_id.get(),
+                    state.now_playing.as_ref(),
+                )
+                .await
+                {
                     warn!("Failed to persist now_playing to Redis: {e}");
                 }
             }
@@ -114,7 +134,10 @@ impl SongbirdEventHandler for TrackEndHandler {
                 if let Some(ref np) = state.now_playing {
                     let embed = embeds::now_playing_embed(np);
                     let builder = serenity::builder::CreateMessage::new().embed(embed);
-                    if let Err(e) = channel_id.send_message(&self.ctx.discord_http, builder).await {
+                    if let Err(e) = channel_id
+                        .send_message(&self.ctx.discord_http, builder)
+                        .await
+                    {
                         warn!("Failed to send now-playing message: {e}");
                     }
                 }
@@ -125,7 +148,10 @@ impl SongbirdEventHandler for TrackEndHandler {
             // Save finished track to history
             if let Some(ref pool) = self.ctx.redis_pool {
                 if let Some(ref finished) = state.now_playing {
-                    if let Err(e) = crate::state::redis::add_to_history(pool, self.ctx.guild_id.get(), finished).await {
+                    if let Err(e) =
+                        crate::state::redis::add_to_history(pool, self.ctx.guild_id.get(), finished)
+                            .await
+                    {
                         warn!("Failed to save track to history: {e}");
                     }
                 }
@@ -137,7 +163,9 @@ impl SongbirdEventHandler for TrackEndHandler {
 
             // Persist
             if let Some(ref pool) = self.ctx.redis_pool {
-                if let Err(e) = crate::state::redis::save_now_playing(pool, self.ctx.guild_id.get(), None).await {
+                if let Err(e) =
+                    crate::state::redis::save_now_playing(pool, self.ctx.guild_id.get(), None).await
+                {
                     warn!("Failed to clear now_playing in Redis: {e}");
                 }
             }
@@ -155,18 +183,39 @@ impl SongbirdEventHandler for TrackErrorHandler {
         } else {
             "Unknown error".to_string()
         };
-        error!("Track error in guild {}: {error_msg}", self.ctx.guild_id);
+        let classified_error = classify_media_error(&error_msg);
+        error!(
+            "Track error in guild {}: {}; classified={classified_error}",
+            self.ctx.guild_id, error_msg
+        );
 
         let mut state = self.ctx.guild_state.lock().await;
-        let failed_title = state.now_playing.as_ref().map(|t| t.title.clone()).unwrap_or_default();
+        let failed_title = state
+            .now_playing
+            .as_ref()
+            .map(|t| t.title.clone())
+            .unwrap_or_default();
         state.now_playing = None;
         state.current_track_handle = None;
 
         // Notify text channel
         if let Some(channel_id) = state.text_channel_id {
-            let embed = embeds::error_embed(&format!("An error occurred while playing **{failed_title}**. Skipping to next track."));
+            let message = match &classified_error {
+                BotError::AntiBotChallenge => {
+                    "YouTube rejected this stream. Verify the POT server and try again."
+                }
+                BotError::RateLimited => "YouTube is rate-limiting playback right now. Skipping.",
+                BotError::StreamNetwork(_) => "The stream dropped mid-playback. Skipping.",
+                _ => "Playback failed mid-stream. Skipping to the next track.",
+            };
+            let embed = embeds::error_embed(&format!(
+                "Playback error while playing **{failed_title}**. {message}"
+            ));
             let builder = serenity::builder::CreateMessage::new().embed(embed);
-            if let Err(e) = channel_id.send_message(&self.ctx.discord_http, builder).await {
+            if let Err(e) = channel_id
+                .send_message(&self.ctx.discord_http, builder)
+                .await
+            {
                 warn!("Failed to send track error message: {e}");
             }
         }
@@ -188,22 +237,27 @@ pub async fn play_track(
     ctx: &PlayContext,
     track: &TrackMetadata,
     state: &mut GuildState,
-) -> Result<(), String> {
-    let handler_lock = ctx.manager
+) -> BotResult<()> {
+    let handler_lock = ctx
+        .manager
         .get(ctx.guild_id)
-        .ok_or_else(|| "Not in a voice channel".to_string())?;
+        .ok_or_else(|| BotError::JoinError("Not in a voice channel".to_string()))?;
 
     let mut handler = handler_lock.lock().await;
-    debug!("Voice handler locked for guild {}, current_channel={:?}", ctx.guild_id, handler.current_channel());
+    debug!(
+        "Voice handler locked for guild {}, current_channel={:?}",
+        ctx.guild_id,
+        handler.current_channel()
+    );
 
     let input: Input = if state.normalize {
         debug!("Creating normalized source for: {}", track.url);
-        super::normalized_source::create_normalized_source(&track.url)
-            .await
-            .map_err(|e| format!("Normalized source failed: {e}"))?
+        super::normalized_source::create_normalized_source(&track.url).await?
     } else {
         debug!("Creating YoutubeDl source for: {}", track.url);
-        YoutubeDl::new(ctx.http_client.clone(), track.url.clone()).into()
+        YoutubeDl::new(ctx.http_client.clone(), track.url.clone())
+            .user_args(build_ytdlp_user_args())
+            .into()
     };
 
     debug!("Calling play_input for track: {}", track.title);

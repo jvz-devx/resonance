@@ -6,6 +6,9 @@ services:
   bot:
     build: .
     env_file: .env
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      POT_SERVER_URL: ${POT_SERVER_URL:-http://pot-server:4416}
     depends_on:
       - redis
       - pot-server

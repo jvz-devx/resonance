@@ -12,15 +12,10 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     let gs = state_lock.lock().await;
 
     let tracks: Vec<_> = gs.queue.tracks.iter().cloned().collect();
-    let embed = embeds::queue_embed(
-        gs.now_playing.as_ref(),
-        &tracks,
-        &gs.loop_mode,
-    );
+    let embed = embeds::queue_embed(gs.now_playing.as_ref(), &tracks, &gs.loop_mode);
 
-    let response = CreateInteractionResponse::Message(
-        CreateInteractionResponseMessage::new().embed(embed),
-    );
+    let response =
+        CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().embed(embed));
     command.create_response(&ctx.http, response).await?;
 
     Ok(())

@@ -33,27 +33,16 @@ pub fn all_commands() -> Vec<CreateCommand> {
         CreateCommand::new("search")
             .description("Search YouTube and pick from 3 results")
             .add_option(
-                CreateCommandOption::new(
-                    CommandOptionType::String,
-                    "query",
-                    "Search query",
-                )
-                .required(true),
+                CreateCommandOption::new(CommandOptionType::String, "query", "Search query")
+                    .required(true),
             ),
-        CreateCommand::new("queue")
-            .description("Show the current music queue"),
-        CreateCommand::new("skip")
-            .description("Skip the current track"),
-        CreateCommand::new("pause")
-            .description("Pause the current track"),
-        CreateCommand::new("resume")
-            .description("Resume the paused track"),
-        CreateCommand::new("stop")
-            .description("Stop playback and clear the queue"),
-        CreateCommand::new("nowplaying")
-            .description("Show the currently playing track"),
-        CreateCommand::new("shuffle")
-            .description("Shuffle the queue"),
+        CreateCommand::new("queue").description("Show the current music queue"),
+        CreateCommand::new("skip").description("Skip the current track"),
+        CreateCommand::new("pause").description("Pause the current track"),
+        CreateCommand::new("resume").description("Resume the paused track"),
+        CreateCommand::new("stop").description("Stop playback and clear the queue"),
+        CreateCommand::new("nowplaying").description("Show the currently playing track"),
+        CreateCommand::new("shuffle").description("Shuffle the queue"),
         CreateCommand::new("loop")
             .description("Set the loop mode")
             .add_option(
@@ -91,9 +80,7 @@ pub fn all_commands() -> Vec<CreateCommand> {
                 .add_string_choice("On", "on")
                 .add_string_choice("Off", "off"),
             ),
-        CreateCommand::new("join")
-            .description("Join your voice channel"),
-        CreateCommand::new("leave")
-            .description("Leave the voice channel"),
+        CreateCommand::new("join").description("Join your voice channel"),
+        CreateCommand::new("leave").description("Leave the voice channel"),
     ]
 }

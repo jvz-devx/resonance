@@ -4,7 +4,7 @@ use serenity::builder::{
 };
 use tracing::{debug, error, info};
 
-use crate::player::events::{play_track, PlayContext};
+use crate::player::events::{PlayContext, play_track};
 use crate::queue::track::TrackMetadata;
 use crate::state;
 use crate::utils::embeds;
@@ -30,9 +30,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     info!("Query: {query}");
 
     // Defer response since this might take a while
-    let defer = CreateInteractionResponse::Defer(
-        CreateInteractionResponseMessage::new(),
-    );
+    let defer = CreateInteractionResponse::Defer(CreateInteractionResponseMessage::new());
     command.create_response(&ctx.http, defer).await?;
 
     // Ensure bot is in voice channel (auto-join)
@@ -47,7 +45,10 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         .and_then(|vs| vs.channel_id)
         .ok_or(BotError::NotInVoice)?;
 
-    info!("User {} is in voice channel {user_channel}", command.user.name);
+    info!(
+        "User {} is in voice channel {user_channel}",
+        command.user.name
+    );
 
     let manager = state::get_songbird(ctx).await?;
 
@@ -67,7 +68,10 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         match manager.join(guild_id, user_channel).await {
             Ok(call) => {
                 info!("Successfully joined voice channel {user_channel}");
-                debug!("Call lock obtained: {:?}", call.lock().await.current_channel());
+                debug!(
+                    "Call lock obtained: {:?}",
+                    call.lock().await.current_channel()
+                );
             }
             Err(e) => {
                 error!("Failed to join voice channel {user_channel}: {e:?}");
@@ -120,18 +124,22 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
             discord_http: ctx.http.clone(),
             redis_pool: redis_pool.clone(),
         };
-        match play_track(&play_ctx, &track, &mut gs).await
-        {
+        match play_track(&play_ctx, &track, &mut gs).await {
             Ok(()) => info!("Playback started successfully"),
             Err(e) => {
                 error!("Failed to start playback: {e}");
-                return Err(BotError::PlayFailed(e));
+                return Err(e);
             }
         }
 
         // Persist
         if let Some(ref pool) = redis_pool {
-            let _ = crate::state::redis::save_now_playing(pool, guild_id.get(), gs.now_playing.as_ref()).await;
+            let _ = crate::state::redis::save_now_playing(
+                pool,
+                guild_id.get(),
+                gs.now_playing.as_ref(),
+            )
+            .await;
         }
 
         let embed = embeds::now_playing_embed(&track);

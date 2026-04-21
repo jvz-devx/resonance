@@ -49,8 +49,8 @@ pub async fn search_youtube(
 pub async fn resolve_query(query: &str) -> BotResult<(String, String, Option<Duration>)> {
     if is_youtube_url(query) {
         // Fetch video info for the URL
-        let video = rusty_ytdl::Video::new(query)
-            .map_err(|e| BotError::SearchFailed(e.to_string()))?;
+        let video =
+            rusty_ytdl::Video::new(query).map_err(|e| BotError::SearchFailed(e.to_string()))?;
 
         let info = video
             .get_basic_info()
@@ -69,10 +69,7 @@ pub async fn resolve_query(query: &str) -> BotResult<(String, String, Option<Dur
     } else {
         // Search and take first result
         let results = search_youtube(query, 1).await?;
-        results
-            .into_iter()
-            .next()
-            .ok_or(BotError::NoResults)
+        results.into_iter().next().ok_or(BotError::NoResults)
     }
 }
 

@@ -4,8 +4,9 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
-use tracing::debug;
+use tracing::{debug, warn};
 
+use crate::player::media_tools::{build_ytdlp_user_args, classify_media_error, log_excerpt};
 use crate::utils::error::{BotError, BotResult};
 
 /// Create an audio source that pipes through ffmpeg with dynamic audio normalization.
@@ -16,31 +17,35 @@ use crate::utils::error::{BotError, BotResult};
 pub async fn create_normalized_source(url: &str) -> BotResult<Input> {
     // Resolve direct stream URL via yt-dlp
     debug!("Resolving URL via yt-dlp for normalization: {url}");
-    let ytdl_future = Command::new("yt-dlp")
-        .args([
-            "-j",
-            "-f",
-            "ba/b[vcodec=none]/b",
-            "--no-playlist",
-            url,
-        ])
-        .output();
-    let ytdl_output = timeout(Duration::from_secs(15), ytdl_future)
+    let mut ytdl_command = Command::new("yt-dlp");
+    ytdl_command.args(build_ytdlp_user_args());
+    ytdl_command.args([
+        "-j",
+        "-f",
+        "ba[abr>0][vcodec=none]/best",
+        "--no-playlist",
+        url,
+    ]);
+
+    let ytdl_output = timeout(Duration::from_secs(15), ytdl_command.output())
         .await
-        .map_err(|_| BotError::Other("yt-dlp timed out after 15s".into()))?
-        .map_err(|e| BotError::Other(format!("Failed to run yt-dlp: {e}")))?;
+        .map_err(|_| BotError::ExtractorFailed("yt-dlp timed out after 15s".into()))?
+        .map_err(|e| {
+            BotError::ExtractorFailed(log_excerpt(&format!("Failed to run yt-dlp: {e}")))
+        })?;
 
     if !ytdl_output.status.success() {
         let stderr = String::from_utf8_lossy(&ytdl_output.stderr);
-        return Err(BotError::Other(format!("yt-dlp failed: {stderr}")));
+        return Err(classify_media_error(stderr.as_ref()));
     }
 
-    let info: serde_json::Value = serde_json::from_slice(&ytdl_output.stdout)
-        .map_err(|e| BotError::Other(format!("Failed to parse yt-dlp output: {e}")))?;
+    let info: serde_json::Value = serde_json::from_slice(&ytdl_output.stdout).map_err(|e| {
+        BotError::ExtractorFailed(log_excerpt(&format!("Failed to parse yt-dlp output: {e}")))
+    })?;
 
-    let stream_url = info["url"]
-        .as_str()
-        .ok_or_else(|| BotError::Other("yt-dlp output missing 'url' field".to_string()))?;
+    let stream_url = info["url"].as_str().ok_or_else(|| {
+        BotError::ExtractorFailed("yt-dlp output missing 'url' field".to_string())
+    })?;
 
     // Build a SINGLE -headers string (ffmpeg only honors the last one).
     // Headers must come BEFORE -i. Same for -reconnect flags.
@@ -103,14 +108,22 @@ pub async fn create_normalized_source(url: &str) -> BotResult<Input> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| BotError::Other(format!("Failed to spawn ffmpeg: {e}")))?;
+        .map_err(|e| {
+            BotError::FfmpegSetupFailed(log_excerpt(&format!("Failed to spawn ffmpeg: {e}")))
+        })?;
 
     // Drain stderr on a background task so expired URLs / 403s / hangs are visible.
     if let Some(stderr) = child.stderr.take() {
         tokio::task::spawn_blocking(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines().map_while(Result::ok) {
-                debug!(target: "ffmpeg", "{line}");
+                match classify_media_error(&line) {
+                    BotError::AntiBotChallenge
+                    | BotError::RateLimited
+                    | BotError::MediaForbidden
+                    | BotError::StreamNetwork(_) => warn!(target: "ffmpeg", "{line}"),
+                    _ => debug!(target: "ffmpeg", "{line}"),
+                }
             }
         });
     }
