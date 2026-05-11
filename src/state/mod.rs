@@ -49,10 +49,18 @@ impl LoopMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaybackState {
+    Idle,
+    Starting,
+    Playing,
+}
+
 /// Per-guild state holding queue, playback info, and settings
 pub struct GuildState {
     pub queue: QueueManager,
     pub now_playing: Option<TrackMetadata>,
+    pub playback_state: PlaybackState,
     pub loop_mode: LoopMode,
     pub normalize: bool,
     pub current_track_handle: Option<TrackHandle>,
@@ -65,6 +73,7 @@ impl GuildState {
         Self {
             queue: QueueManager::new(),
             now_playing: None,
+            playback_state: PlaybackState::Idle,
             loop_mode: LoopMode::Off,
             normalize: DEFAULT_NORMALIZE,
             current_track_handle: None,
@@ -80,7 +89,7 @@ impl GuildState {
 
     /// Check if the guild has been idle for the given duration
     pub fn is_idle_for(&self, duration: std::time::Duration) -> bool {
-        self.now_playing.is_none() && self.last_activity.elapsed() >= duration
+        self.playback_state == PlaybackState::Idle && self.last_activity.elapsed() >= duration
     }
 }
 

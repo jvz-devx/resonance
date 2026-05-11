@@ -13,7 +13,7 @@ use crate::commands;
 use crate::commands::search::emoji_to_index;
 use crate::player::events::{PlayContext, play_track};
 use crate::queue::track::TrackMetadata;
-use crate::state;
+use crate::state::{self, PlaybackState};
 use crate::utils::embeds;
 
 pub struct Handler;
@@ -242,6 +242,18 @@ async fn handle_reaction(
     };
 
     let manager = state::get_songbird(ctx).await?;
+    let guild_state_arc = state::get_or_load_guild_state(ctx, guild_id).await?;
+    let http_client = state::get_http_client(ctx).await?;
+    let redis_pool = state::get_redis_pool(ctx).await;
+
+    {
+        let mut gs = guild_state_arc.lock().await;
+        gs.text_channel_id = Some(channel_id);
+        if gs.now_playing.is_none() {
+            gs.playback_state = PlaybackState::Starting;
+        }
+        gs.touch();
+    }
 
     // Remove stale connection before joining
     if let Some(call) = manager.get(guild_id) {
@@ -263,17 +275,17 @@ async fn handle_reaction(
             Err(e) => {
                 error!("Failed to join voice channel {user_channel} in guild {guild_id}: {e:?}");
                 let _ = manager.remove(guild_id).await;
+                let mut gs = guild_state_arc.lock().await;
+                if gs.now_playing.is_none() {
+                    gs.playback_state = PlaybackState::Idle;
+                    gs.touch();
+                }
                 return Ok(());
             }
         }
     } else {
         debug!("Already in voice channel for guild {guild_id}, skipping join");
     }
-
-    // Get shared state
-    let guild_state_arc = state::get_or_load_guild_state(ctx, guild_id).await?;
-    let http_client = state::get_http_client(ctx).await?;
-    let redis_pool = state::get_redis_pool(ctx).await;
 
     let mut gs = guild_state_arc.lock().await;
     gs.text_channel_id = Some(channel_id);
@@ -311,6 +323,8 @@ async fn handle_reaction(
             }
             Err(e) => {
                 error!("Failed to play selected track: {e}");
+                gs.playback_state = PlaybackState::Idle;
+                gs.touch();
                 let _ = channel_id
                     .say(&ctx.http, format!("Failed to play: {}", e.user_message()))
                     .await;
@@ -404,6 +418,15 @@ fn spawn_auto_disconnect(ctx: Context) {
             let redis_pool = state::get_redis_pool(&ctx).await;
 
             for guild_id in guilds_to_leave {
+                if let Some(entry) = guild_states.get(&guild_id) {
+                    let gs = entry.value().lock().await;
+                    if !gs.is_idle_for(idle_timeout) {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+
                 let _ = manager.remove(guild_id).await;
 
                 // Clean up state
@@ -412,6 +435,7 @@ fn spawn_auto_disconnect(ctx: Context) {
                     gs.queue.clear();
                     gs.now_playing = None;
                     gs.current_track_handle = None;
+                    gs.playback_state = PlaybackState::Idle;
                 }
 
                 // Remove from DashMap to prevent memory leak

@@ -1,7 +1,7 @@
 use serenity::all::{CommandInteraction, Context};
 use serenity::builder::{CreateInteractionResponse, CreateInteractionResponseMessage};
 
-use crate::state;
+use crate::state::{self, PlaybackState};
 use crate::utils::embeds;
 use crate::utils::error::{BotError, BotResult};
 
@@ -21,6 +21,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     gs.queue.clear();
     gs.now_playing = None;
     gs.current_track_handle = None;
+    gs.playback_state = PlaybackState::Idle;
     gs.touch();
 
     // Persist

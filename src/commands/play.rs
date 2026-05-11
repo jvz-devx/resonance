@@ -6,7 +6,7 @@ use tracing::{debug, error, info};
 
 use crate::player::events::{PlayContext, play_track};
 use crate::queue::track::TrackMetadata;
-use crate::state;
+use crate::state::{self, PlaybackState};
 use crate::utils::embeds;
 use crate::utils::error::{BotError, BotResult};
 use crate::youtube::search;
@@ -51,6 +51,18 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     );
 
     let manager = state::get_songbird(ctx).await?;
+    let guild_state_arc = state::get_or_load_guild_state(ctx, guild_id).await?;
+    let http_client = state::get_http_client(ctx).await?;
+    let redis_pool = state::get_redis_pool(ctx).await;
+
+    {
+        let mut gs = guild_state_arc.lock().await;
+        gs.text_channel_id = Some(command.channel_id);
+        if gs.now_playing.is_none() {
+            gs.playback_state = PlaybackState::Starting;
+        }
+        gs.touch();
+    }
 
     // Remove stale connection before joining
     if let Some(call) = manager.get(guild_id) {
@@ -76,6 +88,11 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
             Err(e) => {
                 error!("Failed to join voice channel {user_channel}: {e:?}");
                 let _ = manager.remove(guild_id).await;
+                let mut gs = guild_state_arc.lock().await;
+                if gs.now_playing.is_none() {
+                    gs.playback_state = PlaybackState::Idle;
+                    gs.touch();
+                }
                 return Err(BotError::JoinError(format!("{e:?}")));
             }
         }
@@ -92,6 +109,11 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         }
         Err(e) => {
             error!("Failed to resolve query '{query}': {e}");
+            let mut gs = guild_state_arc.lock().await;
+            if gs.now_playing.is_none() {
+                gs.playback_state = PlaybackState::Idle;
+                gs.touch();
+            }
             return Err(e);
         }
     };
@@ -104,11 +126,6 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         command.user.id,
         command.user.name.clone(),
     );
-
-    // Get shared state
-    let guild_state_arc = state::get_or_load_guild_state(ctx, guild_id).await?;
-    let http_client = state::get_http_client(ctx).await?;
-    let redis_pool = state::get_redis_pool(ctx).await;
 
     let mut gs = guild_state_arc.lock().await;
     gs.text_channel_id = Some(command.channel_id);
@@ -128,6 +145,8 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
             Ok(()) => info!("Playback started successfully"),
             Err(e) => {
                 error!("Failed to start playback: {e}");
+                gs.playback_state = PlaybackState::Idle;
+                gs.touch();
                 return Err(e);
             }
         }

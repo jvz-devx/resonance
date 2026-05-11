@@ -16,6 +16,8 @@ fn build_ytdlp_user_args_from_env(pot_server_url: Option<&str>) -> Vec<String> {
 
     vec![
         "--extractor-args".to_string(),
+        "youtubepot-bgutilcli:cli_path=/nonexistent-bgutil-pot".to_string(),
+        "--extractor-args".to_string(),
         format!("youtubepot-bgutilhttp:base_url={pot_server_url}"),
     ]
 }
@@ -77,6 +79,8 @@ mod tests {
         assert_eq!(
             build_ytdlp_user_args_from_env(Some("http://pot-server:4416")),
             vec![
+                "--extractor-args".to_string(),
+                "youtubepot-bgutilcli:cli_path=/nonexistent-bgutil-pot".to_string(),
                 "--extractor-args".to_string(),
                 "youtubepot-bgutilhttp:base_url=http://pot-server:4416".to_string(),
             ]

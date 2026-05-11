@@ -10,7 +10,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::player::media_tools::{build_ytdlp_user_args, classify_media_error};
 use crate::queue::track::TrackMetadata;
-use crate::state::{GuildState, LoopMode};
+use crate::state::{GuildState, LoopMode, PlaybackState};
 use crate::utils::embeds;
 use crate::utils::error::{BotError, BotResult};
 
@@ -92,6 +92,8 @@ impl SongbirdEventHandler for TrackEndHandler {
                 error!("Failed to play next track: {e}");
                 state.now_playing = None;
                 state.current_track_handle = None;
+                state.playback_state = PlaybackState::Idle;
+                state.touch();
 
                 // Notify text channel about the failure
                 if let Some(channel_id) = state.text_channel_id {
@@ -159,6 +161,7 @@ impl SongbirdEventHandler for TrackEndHandler {
 
             state.now_playing = None;
             state.current_track_handle = None;
+            state.playback_state = PlaybackState::Idle;
             state.touch();
 
             // Persist
@@ -197,6 +200,8 @@ impl SongbirdEventHandler for TrackErrorHandler {
             .unwrap_or_default();
         state.now_playing = None;
         state.current_track_handle = None;
+        state.playback_state = PlaybackState::Idle;
+        state.touch();
 
         // Notify text channel
         if let Some(channel_id) = state.text_channel_id {
@@ -243,6 +248,9 @@ pub async fn play_track(
         .get(ctx.guild_id)
         .ok_or_else(|| BotError::JoinError("Not in a voice channel".to_string()))?;
 
+    state.playback_state = PlaybackState::Starting;
+    state.touch();
+
     let mut handler = handler_lock.lock().await;
     debug!(
         "Voice handler locked for guild {}, current_channel={:?}",
@@ -286,6 +294,7 @@ pub async fn play_track(
 
     state.now_playing = Some(track.clone());
     state.current_track_handle = Some(track_handle);
+    state.playback_state = PlaybackState::Playing;
     state.touch();
 
     Ok(())
