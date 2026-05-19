@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::commands;
 use crate::commands::search::emoji_to_index;
-use crate::player::events::{PlayContext, play_track};
+use crate::player::events::{PlayContext, play_track, register_voice_diagnostics};
 use crate::queue::track::TrackMetadata;
 use crate::state::{self, PlaybackState};
 use crate::utils::embeds;
@@ -269,7 +269,9 @@ async fn handle_reaction(
         debug!("Joining voice channel {user_channel} in guild {guild_id} (search selection)");
         match manager.join(guild_id, user_channel).await {
             Ok(call) => {
-                let ch = call.lock().await.current_channel();
+                let mut call = call.lock().await;
+                register_voice_diagnostics(&mut call, guild_id);
+                let ch = call.current_channel();
                 debug!("Voice join succeeded for guild {guild_id}: channel={ch:?}");
             }
             Err(e) => {

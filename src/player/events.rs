@@ -1,9 +1,12 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use serenity::all::Http;
 use serenity::model::id::GuildId;
 use songbird::Songbird;
-use songbird::events::{Event, EventContext, EventHandler as SongbirdEventHandler, TrackEvent};
+use songbird::events::{
+    CoreEvent, Event, EventContext, EventHandler as SongbirdEventHandler, TrackEvent,
+};
 use songbird::input::{Input, YoutubeDl};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
@@ -40,17 +43,60 @@ impl PlayContext {
 /// Event handler that fires when a track ends — plays the next track from queue
 pub struct TrackEndHandler {
     pub ctx: PlayContext,
+    pub diagnostics: PlaybackDiagnostics,
 }
 
 /// Event handler that fires when a track encounters an error
 pub struct TrackErrorHandler {
     pub ctx: PlayContext,
+    pub diagnostics: PlaybackDiagnostics,
+}
+
+#[derive(Clone)]
+pub struct PlaybackDiagnostics {
+    pub track_title: String,
+    pub track_url: String,
+    pub mode: PlaybackMode,
+    pub started_at: Instant,
+}
+
+#[derive(Clone, Copy)]
+pub enum PlaybackMode {
+    Direct,
+    Normalized,
+}
+
+impl PlaybackMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::Normalized => "normalized",
+        }
+    }
+}
+
+pub struct TrackDiagnosticHandler {
+    pub guild_id: GuildId,
+    pub diagnostics: PlaybackDiagnostics,
+    pub event_name: &'static str,
+}
+
+pub struct VoiceDiagnosticHandler {
+    pub guild_id: GuildId,
+    pub event_name: &'static str,
 }
 
 #[async_trait::async_trait]
 impl SongbirdEventHandler for TrackEndHandler {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
-        info!("Track ended for guild {}", self.ctx.guild_id);
+        info!(
+            "Track ended for guild {} after {:?}: mode={}, title={}, url={}",
+            self.ctx.guild_id,
+            self.diagnostics.started_at.elapsed(),
+            self.diagnostics.mode.as_str(),
+            self.diagnostics.track_title,
+            self.diagnostics.track_url
+        );
 
         let mut state = self.ctx.guild_state.lock().await;
 
@@ -188,8 +234,13 @@ impl SongbirdEventHandler for TrackErrorHandler {
         };
         let classified_error = classify_media_error(&error_msg);
         error!(
-            "Track error in guild {}: {}; classified={classified_error}",
-            self.ctx.guild_id, error_msg
+            "Track error in guild {} after {:?}: mode={}, title={}, url={}, error={}; classified={classified_error}",
+            self.ctx.guild_id,
+            self.diagnostics.started_at.elapsed(),
+            self.diagnostics.mode.as_str(),
+            self.diagnostics.track_title,
+            self.diagnostics.track_url,
+            error_msg
         );
 
         let mut state = self.ctx.guild_state.lock().await;
@@ -237,6 +288,77 @@ impl SongbirdEventHandler for TrackErrorHandler {
     }
 }
 
+#[async_trait::async_trait]
+impl SongbirdEventHandler for TrackDiagnosticHandler {
+    async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
+        debug!(
+            "Track event context for guild {} event={}: {:?}",
+            self.guild_id, self.event_name, ctx
+        );
+        info!(
+            "Track event for guild {} after {:?}: event={}, mode={}, title={}, url={}",
+            self.guild_id,
+            self.diagnostics.started_at.elapsed(),
+            self.event_name,
+            self.diagnostics.mode.as_str(),
+            self.diagnostics.track_title,
+            self.diagnostics.track_url
+        );
+        None
+    }
+}
+
+#[async_trait::async_trait]
+impl SongbirdEventHandler for VoiceDiagnosticHandler {
+    async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
+        match ctx {
+            EventContext::DriverConnect(data) | EventContext::DriverReconnect(data) => {
+                info!(
+                    "Discord voice driver event for guild {}: event={}, server={:?}",
+                    self.guild_id, self.event_name, data.server
+                );
+            }
+            EventContext::DriverDisconnect(data) => {
+                warn!(
+                    "Discord voice driver event for guild {}: event={}, reason={:?}",
+                    self.guild_id, self.event_name, data.reason
+                );
+            }
+            _ => {
+                debug!(
+                    "Discord voice driver event for guild {}: event={}, context={:?}",
+                    self.guild_id, self.event_name, ctx
+                );
+            }
+        }
+        None
+    }
+}
+
+pub fn register_voice_diagnostics(call: &mut songbird::Call, guild_id: GuildId) {
+    call.add_global_event(
+        Event::Core(CoreEvent::DriverConnect),
+        VoiceDiagnosticHandler {
+            guild_id,
+            event_name: "connect",
+        },
+    );
+    call.add_global_event(
+        Event::Core(CoreEvent::DriverReconnect),
+        VoiceDiagnosticHandler {
+            guild_id,
+            event_name: "reconnect",
+        },
+    );
+    call.add_global_event(
+        Event::Core(CoreEvent::DriverDisconnect),
+        VoiceDiagnosticHandler {
+            guild_id,
+            event_name: "disconnect",
+        },
+    );
+}
+
 /// Play a track via songbird, updating the guild state
 pub async fn play_track(
     ctx: &PlayContext,
@@ -258,6 +380,21 @@ pub async fn play_track(
         handler.current_channel()
     );
 
+    let mode = if state.normalize {
+        PlaybackMode::Normalized
+    } else {
+        PlaybackMode::Direct
+    };
+    let source_started_at = Instant::now();
+    info!(
+        "Preparing playback source for guild {}: mode={}, title={}, url={}, queue_len={}",
+        ctx.guild_id,
+        mode.as_str(),
+        track.title,
+        track.url,
+        state.queue.len()
+    );
+
     let input: Input = if state.normalize {
         debug!("Creating normalized source for: {}", track.url);
         super::normalized_source::create_normalized_source(&track.url).await?
@@ -267,16 +404,54 @@ pub async fn play_track(
             .user_args(build_ytdlp_user_args())
             .into()
     };
+    info!(
+        "Prepared playback source for guild {} in {:?}: mode={}, title={}",
+        ctx.guild_id,
+        source_started_at.elapsed(),
+        mode.as_str(),
+        track.title
+    );
 
     debug!("Calling play_input for track: {}", track.title);
+    let submitted_at = Instant::now();
     let track_handle = handler.play_input(input);
-    debug!("Track submitted to driver for guild {}", ctx.guild_id);
+    let diagnostics = PlaybackDiagnostics {
+        track_title: track.title.clone(),
+        track_url: track.url.clone(),
+        mode,
+        started_at: submitted_at,
+    };
+    info!(
+        "Track submitted to driver for guild {}: mode={}, title={}, url={}",
+        ctx.guild_id,
+        mode.as_str(),
+        track.title,
+        track.url
+    );
+
+    for (event, event_name) in [
+        (TrackEvent::Preparing, "preparing"),
+        (TrackEvent::Playable, "playable"),
+        (TrackEvent::Play, "play"),
+    ] {
+        if let Err(e) = track_handle.add_event(
+            songbird::Event::Track(event),
+            TrackDiagnosticHandler {
+                guild_id: ctx.guild_id,
+                diagnostics: diagnostics.clone(),
+                event_name,
+            },
+        ) {
+            warn!("Failed to register track {event_name} event: {e}");
+        }
+    }
 
     // Register end-of-track event for auto-advance
     if let Err(e) = track_handle.add_event(
         songbird::Event::Track(TrackEvent::End),
         TrackEndHandler {
             ctx: ctx.clone_ctx(),
+            diagnostics: diagnostics.clone(),
         },
     ) {
         warn!("Failed to register track end event: {e}");
@@ -287,6 +462,7 @@ pub async fn play_track(
         songbird::Event::Track(TrackEvent::Error),
         TrackErrorHandler {
             ctx: ctx.clone_ctx(),
+            diagnostics,
         },
     ) {
         warn!("Failed to register track error event: {e}");

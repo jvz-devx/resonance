@@ -4,7 +4,7 @@ use serenity::builder::{
 };
 use tracing::{debug, error, info};
 
-use crate::player::events::{PlayContext, play_track};
+use crate::player::events::{PlayContext, play_track, register_voice_diagnostics};
 use crate::queue::track::TrackMetadata;
 use crate::state::{self, PlaybackState};
 use crate::utils::embeds;
@@ -79,11 +79,10 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         info!("Joining voice channel {user_channel} in guild {guild_id}");
         match manager.join(guild_id, user_channel).await {
             Ok(call) => {
+                let mut call = call.lock().await;
+                register_voice_diagnostics(&mut call, guild_id);
                 info!("Successfully joined voice channel {user_channel}");
-                debug!(
-                    "Call lock obtained: {:?}",
-                    call.lock().await.current_channel()
-                );
+                debug!("Call lock obtained: {:?}", call.current_channel());
             }
             Err(e) => {
                 error!("Failed to join voice channel {user_channel}: {e:?}");
