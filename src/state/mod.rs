@@ -7,8 +7,10 @@ use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serenity::model::id::{ChannelId, GuildId, MessageId, UserId};
 use serenity::prelude::TypeMapKey;
+use songbird::input::Input;
 use songbird::tracks::TrackHandle;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 use crate::queue::QueueManager;
 use crate::queue::track::TrackMetadata;
@@ -64,8 +66,22 @@ pub struct GuildState {
     pub loop_mode: LoopMode,
     pub normalize: bool,
     pub current_track_handle: Option<TrackHandle>,
+    pub prefetched_source: Option<PrefetchedSource>,
     pub text_channel_id: Option<ChannelId>,
     pub last_activity: Instant,
+}
+
+pub struct PrefetchedSource {
+    pub track_url: String,
+    pub attempt_id: u64,
+    pub started_at: Instant,
+    pub handle: JoinHandle<crate::utils::error::BotResult<Input>>,
+}
+
+impl PrefetchedSource {
+    pub fn abort(&self) {
+        self.handle.abort();
+    }
 }
 
 impl GuildState {
@@ -77,6 +93,7 @@ impl GuildState {
             loop_mode: LoopMode::Off,
             normalize: DEFAULT_NORMALIZE,
             current_track_handle: None,
+            prefetched_source: None,
             text_channel_id: None,
             last_activity: Instant::now(),
         }
@@ -85,6 +102,17 @@ impl GuildState {
     /// Mark activity (resets idle timer)
     pub fn touch(&mut self) {
         self.last_activity = Instant::now();
+    }
+
+    pub fn invalidate_prefetch(&mut self, reason: &str) {
+        if let Some(prefetch) = self.prefetched_source.take() {
+            tracing::info!(
+                "Invalidating prefetched source: reason={reason}, url={}, attempt_id={}",
+                prefetch.track_url,
+                prefetch.attempt_id
+            );
+            prefetch.abort();
+        }
     }
 
     /// Check if the guild has been idle for the given duration

@@ -24,6 +24,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     }
 
     gs.queue.shuffle();
+    gs.invalidate_prefetch("queue-shuffle");
 
     // Persist
     if let Some(ref pool) = redis_pool {

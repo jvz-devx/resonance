@@ -25,6 +25,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     let mut gs = state_lock.lock().await;
 
     if let Some(removed) = gs.queue.remove(position) {
+        gs.invalidate_prefetch("queue-remove");
         // Persist
         if let Some(ref pool) = redis_pool {
             let tracks: Vec<_> = gs.queue.tracks.iter().cloned().collect();

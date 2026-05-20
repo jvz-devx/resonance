@@ -14,6 +14,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
 
     let count = gs.queue.len();
     gs.queue.clear();
+    gs.invalidate_prefetch("queue-clear");
 
     // Persist
     if let Some(ref pool) = redis_pool {

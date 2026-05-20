@@ -14,10 +14,17 @@ use crate::utils::error::{BotError, BotResult};
 /// Resolves the direct audio URL via yt-dlp, then spawns ffmpeg to decode and
 /// normalize the audio, outputting Opus-in-Ogg on stdout. Outputting Opus lets
 /// Songbird pass the encoded frames straight to Discord without a second encode.
-pub async fn create_normalized_source(url: &str) -> BotResult<Input> {
+pub async fn create_normalized_source_with_timeout(
+    url: &str,
+    ytdl_timeout: Duration,
+    attempt_id: Option<u64>,
+) -> BotResult<Input> {
     // Resolve direct stream URL via yt-dlp
     let ytdl_started_at = Instant::now();
-    info!("Resolving URL via yt-dlp for normalized playback: {url}");
+    info!(
+        "Resolving URL via yt-dlp for normalized playback: attempt_id={:?}, timeout={:?}, url={url}",
+        attempt_id, ytdl_timeout
+    );
     let mut ytdl_command = Command::new("yt-dlp");
     ytdl_command.args(build_ytdlp_user_args());
     ytdl_command.args([
@@ -28,16 +35,20 @@ pub async fn create_normalized_source(url: &str) -> BotResult<Input> {
         url,
     ]);
 
-    let ytdl_output = timeout(Duration::from_secs(15), ytdl_command.output())
+    let ytdl_output = timeout(ytdl_timeout, ytdl_command.output())
         .await
         .map_err(|_| {
-            warn!("yt-dlp timed out after 15s while preparing normalized playback: {url}");
-            BotError::ExtractorFailed("yt-dlp timed out after 15s".into())
+            warn!(
+                "yt-dlp timed out while preparing normalized playback: attempt_id={:?}, timeout={:?}, url={url}",
+                attempt_id, ytdl_timeout
+            );
+            BotError::ExtractorFailed(format!("yt-dlp timed out after {}s", ytdl_timeout.as_secs()))
         })?
         .map_err(|e| {
             warn!(
-                "Failed to run yt-dlp for normalized playback after {:?}: {e}",
-                ytdl_started_at.elapsed()
+                "Failed to run yt-dlp for normalized playback after {:?}: attempt_id={:?}, error={e}",
+                ytdl_started_at.elapsed(),
+                attempt_id
             );
             BotError::ExtractorFailed(log_excerpt(&format!("Failed to run yt-dlp: {e}")))
         })?;
@@ -45,16 +56,18 @@ pub async fn create_normalized_source(url: &str) -> BotResult<Input> {
     if !ytdl_output.status.success() {
         let stderr = String::from_utf8_lossy(&ytdl_output.stderr);
         warn!(
-            "yt-dlp failed for normalized playback after {:?}: {}",
+            "yt-dlp failed for normalized playback after {:?}: attempt_id={:?}, {}",
             ytdl_started_at.elapsed(),
+            attempt_id,
             log_excerpt(stderr.as_ref())
         );
         return Err(classify_media_error(stderr.as_ref()));
     }
 
     info!(
-        "yt-dlp resolved normalized playback source in {:?}",
-        ytdl_started_at.elapsed()
+        "yt-dlp resolved normalized playback source in {:?}: attempt_id={:?}",
+        ytdl_started_at.elapsed(),
+        attempt_id
     );
 
     let info: serde_json::Value = serde_json::from_slice(&ytdl_output.stdout).map_err(|e| {
@@ -70,7 +83,10 @@ pub async fn create_normalized_source(url: &str) -> BotResult<Input> {
         .as_f64()
         .map(|v| format!("{v:.0}kbps"))
         .unwrap_or_else(|| "unknown".to_string());
-    info!("Normalized source metadata: format_id={format_id}, protocol={protocol}, abr={abr}");
+    info!(
+        "Normalized source metadata: attempt_id={:?}, format_id={format_id}, protocol={protocol}, abr={abr}",
+        attempt_id
+    );
 
     // Build a SINGLE -headers string (ffmpeg only honors the last one).
     // Headers must come BEFORE -i. Same for -reconnect flags.
@@ -127,7 +143,10 @@ pub async fn create_normalized_source(url: &str) -> BotResult<Input> {
     ]);
 
     let ffmpeg_started_at = Instant::now();
-    info!("Spawning ffmpeg with dynaudnorm + opus/ogg for normalized playback");
+    info!(
+        "Spawning ffmpeg with dynaudnorm + opus/ogg for normalized playback: attempt_id={:?}",
+        attempt_id
+    );
     let mut child = std::process::Command::new("ffmpeg")
         .args(&ffmpeg_args)
         .stdin(Stdio::null())
@@ -136,14 +155,16 @@ pub async fn create_normalized_source(url: &str) -> BotResult<Input> {
         .spawn()
         .map_err(|e| {
             warn!(
-                "Failed to spawn ffmpeg for normalized playback after {:?}: {e}",
-                ffmpeg_started_at.elapsed()
+                "Failed to spawn ffmpeg for normalized playback after {:?}: attempt_id={:?}, error={e}",
+                ffmpeg_started_at.elapsed(),
+                attempt_id
             );
             BotError::FfmpegSetupFailed(log_excerpt(&format!("Failed to spawn ffmpeg: {e}")))
         })?;
     info!(
-        "ffmpeg spawned for normalized playback in {:?}",
-        ffmpeg_started_at.elapsed()
+        "ffmpeg spawned for normalized playback in {:?}: attempt_id={:?}",
+        ffmpeg_started_at.elapsed(),
+        attempt_id
     );
 
     // Drain stderr on a background task so expired URLs / 403s / hangs are visible.
@@ -155,9 +176,13 @@ pub async fn create_normalized_source(url: &str) -> BotResult<Input> {
                     BotError::AntiBotChallenge
                     | BotError::RateLimited
                     | BotError::MediaForbidden
-                    | BotError::StreamNetwork(_) => warn!(target: "ffmpeg", "{line}"),
-                    _ if is_ffmpeg_diagnostic_line(&line) => warn!(target: "ffmpeg", "{line}"),
-                    _ => debug!(target: "ffmpeg", "{line}"),
+                    | BotError::StreamNetwork(_) => {
+                        warn!(target: "ffmpeg", "attempt_id={attempt_id:?} {line}")
+                    }
+                    _ if is_ffmpeg_diagnostic_line(&line) => {
+                        warn!(target: "ffmpeg", "attempt_id={attempt_id:?} {line}")
+                    }
+                    _ => debug!(target: "ffmpeg", "attempt_id={attempt_id:?} {line}"),
                 }
             }
         });

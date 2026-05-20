@@ -4,7 +4,9 @@ use serenity::builder::{
 };
 use tracing::{debug, error, info};
 
-use crate::player::events::{PlayContext, play_track, register_voice_diagnostics};
+use crate::player::events::{
+    PlayContext, play_track, register_voice_diagnostics, schedule_prefetch,
+};
 use crate::queue::track::TrackMetadata;
 use crate::state::{self, PlaybackState};
 use crate::utils::embeds;
@@ -167,6 +169,15 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         // Already playing — add to queue
         let position = gs.queue.enqueue(track.clone());
         info!("Added to queue at position {position}: {}", track.title);
+        let play_ctx = PlayContext {
+            manager: manager.clone(),
+            guild_id,
+            guild_state: guild_state_arc.clone(),
+            http_client: http_client.clone(),
+            discord_http: ctx.http.clone(),
+            redis_pool: redis_pool.clone(),
+        };
+        schedule_prefetch(&play_ctx, &mut gs, "queue-enqueue");
 
         // Persist queue
         if let Some(ref pool) = redis_pool {

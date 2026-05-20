@@ -23,6 +23,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     let mut gs = state_lock.lock().await;
 
     gs.normalize = explicit.unwrap_or(!gs.normalize);
+    gs.invalidate_prefetch("normalize-toggle");
 
     // Persist
     if let Some(ref pool) = redis_pool {

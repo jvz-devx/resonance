@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use serenity::all::Http;
 use serenity::model::id::GuildId;
@@ -16,6 +17,10 @@ use crate::queue::track::TrackMetadata;
 use crate::state::{GuildState, LoopMode, PlaybackState};
 use crate::utils::embeds;
 use crate::utils::error::{BotError, BotResult};
+
+static PLAYBACK_ATTEMPT_ID: AtomicU64 = AtomicU64::new(1);
+
+const NORMALIZED_YTDL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Shared context for playing tracks, avoiding long parameter lists
 pub struct PlayContext {
@@ -54,6 +59,7 @@ pub struct TrackErrorHandler {
 
 #[derive(Clone)]
 pub struct PlaybackDiagnostics {
+    pub attempt_id: u64,
     pub track_title: String,
     pub track_url: String,
     pub mode: PlaybackMode,
@@ -90,9 +96,10 @@ pub struct VoiceDiagnosticHandler {
 impl SongbirdEventHandler for TrackEndHandler {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
         info!(
-            "Track ended for guild {} after {:?}: mode={}, title={}, url={}",
+            "Track ended for guild {} after {:?}: attempt_id={}, mode={}, title={}, url={}",
             self.ctx.guild_id,
             self.diagnostics.started_at.elapsed(),
+            self.diagnostics.attempt_id,
             self.diagnostics.mode.as_str(),
             self.diagnostics.track_title,
             self.diagnostics.track_url
@@ -234,9 +241,10 @@ impl SongbirdEventHandler for TrackErrorHandler {
         };
         let classified_error = classify_media_error(&error_msg);
         error!(
-            "Track error in guild {} after {:?}: mode={}, title={}, url={}, error={}; classified={classified_error}",
+            "Track error in guild {} after {:?}: attempt_id={}, mode={}, title={}, url={}, error={}; classified={classified_error}",
             self.ctx.guild_id,
             self.diagnostics.started_at.elapsed(),
+            self.diagnostics.attempt_id,
             self.diagnostics.mode.as_str(),
             self.diagnostics.track_title,
             self.diagnostics.track_url,
@@ -292,13 +300,14 @@ impl SongbirdEventHandler for TrackErrorHandler {
 impl SongbirdEventHandler for TrackDiagnosticHandler {
     async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
         debug!(
-            "Track event context for guild {} event={}: {:?}",
-            self.guild_id, self.event_name, ctx
+            "Track event context for guild {} event={} attempt_id={}: {:?}",
+            self.guild_id, self.event_name, self.diagnostics.attempt_id, ctx
         );
         info!(
-            "Track event for guild {} after {:?}: event={}, mode={}, title={}, url={}",
+            "Track event for guild {} after {:?}: attempt_id={}, event={}, mode={}, title={}, url={}",
             self.guild_id,
             self.diagnostics.started_at.elapsed(),
+            self.diagnostics.attempt_id,
             self.event_name,
             self.diagnostics.mode.as_str(),
             self.diagnostics.track_title,
@@ -359,6 +368,167 @@ pub fn register_voice_diagnostics(call: &mut songbird::Call, guild_id: GuildId) 
     );
 }
 
+pub fn invalidate_prefetch(state: &mut GuildState, reason: &str) {
+    state.invalidate_prefetch(reason);
+}
+
+pub fn schedule_prefetch(ctx: &PlayContext, state: &mut GuildState, reason: &str) {
+    if !state.normalize {
+        invalidate_prefetch(state, "normalize-disabled");
+        return;
+    }
+
+    let Some(next_track) = state.queue.peek().cloned() else {
+        invalidate_prefetch(state, "queue-empty");
+        return;
+    };
+
+    if state
+        .prefetched_source
+        .as_ref()
+        .is_some_and(|prefetch| prefetch.track_url == next_track.url)
+    {
+        debug!(
+            "Prefetch already scheduled for guild {}: reason={}, url={}",
+            ctx.guild_id, reason, next_track.url
+        );
+        return;
+    }
+
+    invalidate_prefetch(state, "queue-head-changed");
+
+    let attempt_id = next_attempt_id();
+    let url = next_track.url.clone();
+    let title = next_track.title.clone();
+    info!(
+        "Scheduling normalized prefetch for guild {}: reason={}, attempt_id={}, title={}, url={}",
+        ctx.guild_id, reason, attempt_id, title, url
+    );
+
+    let task_url = url.clone();
+    let handle = tokio::spawn(async move {
+        let started_at = Instant::now();
+        let result = super::normalized_source::create_normalized_source_with_timeout(
+            &task_url,
+            NORMALIZED_YTDL_TIMEOUT,
+            Some(attempt_id),
+        )
+        .await;
+        match &result {
+            Ok(_) => info!(
+                "Normalized prefetch completed in {:?}: attempt_id={}, url={}",
+                started_at.elapsed(),
+                attempt_id,
+                task_url
+            ),
+            Err(e) => warn!(
+                "Normalized prefetch failed in {:?}: attempt_id={}, url={}, error={e}",
+                started_at.elapsed(),
+                attempt_id,
+                task_url
+            ),
+        }
+        result
+    });
+
+    state.prefetched_source = Some(crate::state::PrefetchedSource {
+        track_url: url,
+        attempt_id,
+        started_at: Instant::now(),
+        handle,
+    });
+}
+
+fn next_attempt_id() -> u64 {
+    PLAYBACK_ATTEMPT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn create_direct_source(ctx: &PlayContext, track: &TrackMetadata) -> Input {
+    YoutubeDl::new(ctx.http_client.clone(), track.url.clone())
+        .user_args(build_ytdlp_user_args())
+        .into()
+}
+
+async fn create_playback_input(
+    ctx: &PlayContext,
+    track: &TrackMetadata,
+    state: &mut GuildState,
+    attempt_id: u64,
+) -> BotResult<(Input, PlaybackMode, bool)> {
+    if !state.normalize {
+        debug!("Creating YoutubeDl source for: {}", track.url);
+        return Ok((
+            create_direct_source(ctx, track),
+            PlaybackMode::Direct,
+            false,
+        ));
+    }
+
+    let normalized_started_at = Instant::now();
+    let normalized_result = if state
+        .prefetched_source
+        .as_ref()
+        .is_some_and(|prefetch| prefetch.track_url == track.url)
+    {
+        let prefetch = state.prefetched_source.take().expect("prefetch checked");
+        info!(
+            "Using normalized prefetch for guild {}: playback_attempt_id={}, prefetch_attempt_id={}, age={:?}, title={}, url={}",
+            ctx.guild_id,
+            attempt_id,
+            prefetch.attempt_id,
+            prefetch.started_at.elapsed(),
+            track.title,
+            track.url
+        );
+        match prefetch.handle.await {
+            Ok(result) => result,
+            Err(e) if e.is_cancelled() => Err(BotError::ExtractorFailed(
+                "normalized prefetch was cancelled".to_string(),
+            )),
+            Err(e) => Err(BotError::ExtractorFailed(format!(
+                "normalized prefetch task failed: {e}"
+            ))),
+        }
+    } else {
+        if state.prefetched_source.is_some() {
+            invalidate_prefetch(state, "prefetch-stale-for-current-track");
+        }
+        info!(
+            "Normalized prefetch miss for guild {}: playback_attempt_id={}, title={}, url={}",
+            ctx.guild_id, attempt_id, track.title, track.url
+        );
+        super::normalized_source::create_normalized_source_with_timeout(
+            &track.url,
+            NORMALIZED_YTDL_TIMEOUT,
+            Some(attempt_id),
+        )
+        .await
+    };
+
+    match normalized_result {
+        Ok(input) => {
+            info!(
+                "Normalized source ready for guild {} in {:?}: playback_attempt_id={}, title={}",
+                ctx.guild_id,
+                normalized_started_at.elapsed(),
+                attempt_id,
+                track.title
+            );
+            Ok((input, PlaybackMode::Normalized, false))
+        }
+        Err(e) => {
+            warn!(
+                "Normalized source failed; falling back to direct playback for guild {} after {:?}: playback_attempt_id={}, title={}, error={e}",
+                ctx.guild_id,
+                normalized_started_at.elapsed(),
+                attempt_id,
+                track.title
+            );
+            Ok((create_direct_source(ctx, track), PlaybackMode::Direct, true))
+        }
+    }
+}
+
 /// Play a track via songbird, updating the guild state
 pub async fn play_track(
     ctx: &PlayContext,
@@ -380,35 +550,32 @@ pub async fn play_track(
         handler.current_channel()
     );
 
-    let mode = if state.normalize {
+    let requested_mode = if state.normalize {
         PlaybackMode::Normalized
     } else {
         PlaybackMode::Direct
     };
+    let attempt_id = next_attempt_id();
     let source_started_at = Instant::now();
     info!(
-        "Preparing playback source for guild {}: mode={}, title={}, url={}, queue_len={}",
+        "Preparing playback source for guild {}: attempt_id={}, requested_mode={}, title={}, url={}, queue_len={}",
         ctx.guild_id,
-        mode.as_str(),
+        attempt_id,
+        requested_mode.as_str(),
         track.title,
         track.url,
         state.queue.len()
     );
 
-    let input: Input = if state.normalize {
-        debug!("Creating normalized source for: {}", track.url);
-        super::normalized_source::create_normalized_source(&track.url).await?
-    } else {
-        debug!("Creating YoutubeDl source for: {}", track.url);
-        YoutubeDl::new(ctx.http_client.clone(), track.url.clone())
-            .user_args(build_ytdlp_user_args())
-            .into()
-    };
+    let (input, mode, used_fallback) = create_playback_input(ctx, track, state, attempt_id).await?;
     info!(
-        "Prepared playback source for guild {} in {:?}: mode={}, title={}",
+        "Prepared playback source for guild {} in {:?}: attempt_id={}, requested_mode={}, actual_mode={}, normalized_fallback={}, title={}",
         ctx.guild_id,
         source_started_at.elapsed(),
+        attempt_id,
+        requested_mode.as_str(),
         mode.as_str(),
+        used_fallback,
         track.title
     );
 
@@ -416,15 +583,18 @@ pub async fn play_track(
     let submitted_at = Instant::now();
     let track_handle = handler.play_input(input);
     let diagnostics = PlaybackDiagnostics {
+        attempt_id,
         track_title: track.title.clone(),
         track_url: track.url.clone(),
         mode,
         started_at: submitted_at,
     };
     info!(
-        "Track submitted to driver for guild {}: mode={}, title={}, url={}",
+        "Track submitted to driver for guild {}: attempt_id={}, mode={}, normalized_fallback={}, title={}, url={}",
         ctx.guild_id,
+        attempt_id,
         mode.as_str(),
+        used_fallback,
         track.title,
         track.url
     );
@@ -472,6 +642,7 @@ pub async fn play_track(
     state.current_track_handle = Some(track_handle);
     state.playback_state = PlaybackState::Playing;
     state.touch();
+    schedule_prefetch(ctx, state, "track-started");
 
     Ok(())
 }

@@ -31,6 +31,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
         let state_lock = state::get_or_load_guild_state(ctx, guild_id).await?;
         let redis_pool = state::get_redis_pool(ctx).await;
         let mut gs = state_lock.lock().await;
+        gs.invalidate_prefetch("leave-command");
         gs.queue.clear();
         gs.now_playing = None;
         gs.current_track_handle = None;

@@ -11,7 +11,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::commands;
 use crate::commands::search::emoji_to_index;
-use crate::player::events::{PlayContext, play_track, register_voice_diagnostics};
+use crate::player::events::{
+    PlayContext, play_track, register_voice_diagnostics, schedule_prefetch,
+};
 use crate::queue::track::TrackMetadata;
 use crate::state::{self, PlaybackState};
 use crate::utils::embeds;
@@ -334,6 +336,15 @@ async fn handle_reaction(
         }
     } else {
         let position = gs.queue.enqueue(track.clone());
+        let play_ctx = PlayContext {
+            manager: manager.clone(),
+            guild_id,
+            guild_state: guild_state_arc.clone(),
+            http_client: http_client.clone(),
+            discord_http: ctx.http.clone(),
+            redis_pool: redis_pool.clone(),
+        };
+        schedule_prefetch(&play_ctx, &mut gs, "queue-enqueue-search-selection");
         if let Some(ref pool) = redis_pool {
             let tracks: Vec<_> = gs.queue.tracks.iter().cloned().collect();
             if let Err(e) = crate::state::redis::save_queue(pool, guild_id.get(), &tracks).await {
@@ -434,6 +445,7 @@ fn spawn_auto_disconnect(ctx: Context) {
                 // Clean up state
                 if let Some(entry) = guild_states.get(&guild_id) {
                     let mut gs = entry.value().lock().await;
+                    gs.invalidate_prefetch("auto-disconnect");
                     gs.queue.clear();
                     gs.now_playing = None;
                     gs.current_track_handle = None;

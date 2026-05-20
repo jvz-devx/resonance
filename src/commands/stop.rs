@@ -18,6 +18,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
     }
 
     // Clear everything
+    gs.invalidate_prefetch("stop-command");
     gs.queue.clear();
     gs.now_playing = None;
     gs.current_track_handle = None;
