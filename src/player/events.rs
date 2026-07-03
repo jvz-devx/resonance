@@ -8,11 +8,11 @@ use songbird::Songbird;
 use songbird::events::{
     CoreEvent, Event, EventContext, EventHandler as SongbirdEventHandler, TrackEvent,
 };
-use songbird::input::{Input, YoutubeDl};
+use songbird::input::Input;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
-use crate::player::media_tools::{build_ytdlp_user_args, classify_media_error};
+use crate::player::media_tools::{classify_media_error, create_ytdlp_direct_source};
 use crate::queue::track::TrackMetadata;
 use crate::state::{GuildState, LoopMode, PlaybackState};
 use crate::utils::embeds;
@@ -443,10 +443,8 @@ fn next_attempt_id() -> u64 {
     PLAYBACK_ATTEMPT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-fn create_direct_source(ctx: &PlayContext, track: &TrackMetadata) -> Input {
-    YoutubeDl::new(ctx.http_client.clone(), track.url.clone())
-        .user_args(build_ytdlp_user_args())
-        .into()
+fn create_direct_source(track: &TrackMetadata, attempt_id: u64) -> BotResult<Input> {
+    create_ytdlp_direct_source(&track.url, Some(attempt_id))
 }
 
 async fn create_playback_input(
@@ -456,9 +454,9 @@ async fn create_playback_input(
     attempt_id: u64,
 ) -> BotResult<(Input, PlaybackMode, bool)> {
     if !state.normalize {
-        debug!("Creating YoutubeDl source for: {}", track.url);
+        debug!("Creating yt-dlp child source for: {}", track.url);
         return Ok((
-            create_direct_source(ctx, track),
+            create_direct_source(track, attempt_id)?,
             PlaybackMode::Direct,
             false,
         ));
@@ -524,7 +522,11 @@ async fn create_playback_input(
                 attempt_id,
                 track.title
             );
-            Ok((create_direct_source(ctx, track), PlaybackMode::Direct, true))
+            Ok((
+                create_direct_source(track, attempt_id)?,
+                PlaybackMode::Direct,
+                true,
+            ))
         }
     }
 }

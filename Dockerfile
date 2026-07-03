@@ -35,7 +35,7 @@ RUN apk add --no-cache \
     py3-pip \
     python3 \
   && python3 -m pip install --no-cache-dir --break-system-packages \
-    "yt-dlp>=2026.03.17" \
+    yt-dlp \
     "yt-dlp-getpot-wpc==1.0.0" \
     "bgutil-ytdlp-pot-provider==1.3.1" \
   && printf '%s\n' '#!/bin/sh' 'exec /usr/bin/chromium --no-sandbox --headless=new "$@"' > /usr/local/bin/chromium-wpc \
