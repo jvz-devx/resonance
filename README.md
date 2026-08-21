@@ -108,6 +108,42 @@ All configuration is via environment variables (`.env` file supported):
 
 `POT_SERVER_URL` is optional but recommended for self-hosted Docker playback if YouTube starts returning bot-check challenges or 403/429 errors. The shipped Compose stack wires this to the bundled `pot-server` container automatically.
 
+## YouTube playback maintenance
+
+The release image pins yt-dlp and its PO-token plugins in `requirements.txt`. Dependabot checks those pins weekly, and dependency pull requests build the Docker image before merge. Do not update yt-dlp at container startup: a release must keep the same dependency versions for its lifetime.
+
+Playback incident history:
+
+- `v0.6.6` (2026-07-03) routed playback through yt-dlp while still forcing `youtube:player_client=mweb,web_safari,web`.
+- `v0.6.7` (2026-08-11) removed that override after it caused GoogleVideo 403 responses and returned client selection to yt-dlp.
+- On 2026-08-20, `v0.6.7` failed again because its image still bundled yt-dlp `2026.07.04`. yt-dlp generated a `web_safari` GVS PO token, selected format 251 from an `ANDROID_VR` media URL, and received HTTP 403.
+- A local A/B test on 2026-08-21 confirmed the same URL fails with `2026.07.04` and completes with `2026.08.19`. This is the minimum working version for this incident. See [yt-dlp issue #17456](https://github.com/yt-dlp/yt-dlp/issues/17456) and the [2026.08.19 release](https://github.com/yt-dlp/yt-dlp/releases/tag/2026.08.19), which removed `android_vr` from the default clients.
+
+Reproduce the old failure without verbose output, which keeps signed media URLs and PO tokens out of logs:
+
+```bash
+docker run --rm --platform linux/amd64 --entrypoint yt-dlp \
+  ghcr.io/jvz-devx/resonance:0.6.7@sha256:cb151d06de245266da99f6fc577ab7d699be1c3b0fd2e0c0bd0f5d3165f88e80 \
+  --extractor-args 'youtubepot-wpc:browser_path=/usr/local/bin/chromium-wpc' \
+  -f 'ba[abr>0][vcodec=none]/best' --no-playlist --no-progress \
+  -o /dev/null 'https://www.youtube.com/watch?v=eN7dYDYfvVg'
+```
+
+The command exits with HTTP 403 on yt-dlp `2026.07.04`. Build and verify the current source with the same safe output settings:
+
+```bash
+docker build -t resonance:test .
+docker run --rm --entrypoint yt-dlp resonance:test --version
+docker run --rm --entrypoint yt-dlp resonance:test \
+  --extractor-args 'youtubepot-wpc:browser_path=/usr/local/bin/chromium-wpc' \
+  -f 'ba[abr>0][vcodec=none]/best' --no-playlist --no-progress \
+  -o /dev/null 'https://www.youtube.com/watch?v=eN7dYDYfvVg'
+```
+
+To release, merge the dependency update, push the next `v*` tag, wait for `.github/workflows/docker.yml` to publish GHCR, and resolve the Linux image digest. Then update only `apps/resonance/deployment.yaml` in the `homelab-iac` repository, audit the staged path, push that single `apps`-layer commit, and reconcile the homelab `apps` Kustomization through Flux. Set `KUBECONFIG` to the homelab repository's `kubeconfig` and confirm the current context is `homelab` before reconciling.
+
+Hetzner is a separate cluster with its own Resonance manifest. Never update or deploy it as part of the homelab release unless that deployment is explicitly requested.
+
 ## Architecture
 
 ```

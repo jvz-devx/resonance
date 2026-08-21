@@ -1,0 +1,3 @@
+yt-dlp==2026.08.19
+yt-dlp-getpot-wpc==1.0.0
+bgutil-ytdlp-pot-provider==1.3.1

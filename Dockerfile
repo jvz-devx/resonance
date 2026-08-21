@@ -26,6 +26,8 @@ FROM alpine:3.21
 
 LABEL org.opencontainers.image.source=https://github.com/jvz-devx/resonance
 
+COPY requirements.txt /tmp/requirements.txt
+
 RUN apk add --no-cache \
     ca-certificates \
     chromium \
@@ -35,9 +37,7 @@ RUN apk add --no-cache \
     py3-pip \
     python3 \
   && python3 -m pip install --no-cache-dir --break-system-packages \
-    yt-dlp \
-    "yt-dlp-getpot-wpc==1.0.0" \
-    "bgutil-ytdlp-pot-provider==1.3.1" \
+    -r /tmp/requirements.txt \
   && printf '%s\n' '#!/bin/sh' 'exec /usr/bin/chromium --no-sandbox --headless=new "$@"' > /usr/local/bin/chromium-wpc \
   && chmod +x /usr/local/bin/chromium-wpc
 
