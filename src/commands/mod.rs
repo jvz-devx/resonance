@@ -1,4 +1,5 @@
 pub mod clear;
+pub mod djrole;
 pub mod join;
 pub mod leave;
 pub mod loop_cmd;
@@ -80,6 +81,29 @@ pub fn all_commands() -> Vec<CreateCommand> {
                 .add_string_choice("On", "on")
                 .add_string_choice("Off", "off"),
             ),
+        CreateCommand::new("djrole")
+            .description("Restrict the playback controls to a DJ role")
+            .add_option(
+                CreateCommandOption::new(
+                    CommandOptionType::SubCommand,
+                    "set",
+                    "Only let members with this role control playback",
+                )
+                .add_sub_option(
+                    CreateCommandOption::new(CommandOptionType::Role, "role", "The DJ role")
+                        .required(true),
+                ),
+            )
+            .add_option(CreateCommandOption::new(
+                CommandOptionType::SubCommand,
+                "clear",
+                "Let everyone control playback again",
+            ))
+            .add_option(CreateCommandOption::new(
+                CommandOptionType::SubCommand,
+                "show",
+                "Show the current DJ role",
+            )),
         CreateCommand::new("join").description("Join your voice channel"),
         CreateCommand::new("leave").description("Leave the voice channel"),
     ]

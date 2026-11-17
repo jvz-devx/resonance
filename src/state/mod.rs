@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use serenity::model::id::{ChannelId, GuildId, MessageId, UserId};
+use serenity::model::id::{ChannelId, GuildId, MessageId, RoleId, UserId};
 use serenity::prelude::TypeMapKey;
 use songbird::input::Input;
 use songbird::tracks::TrackHandle;
@@ -65,6 +65,7 @@ pub struct GuildState {
     pub playback_state: PlaybackState,
     pub loop_mode: LoopMode,
     pub normalize: bool,
+    pub dj_role: Option<RoleId>,
     pub current_track_handle: Option<TrackHandle>,
     pub prefetched_source: Option<PrefetchedSource>,
     pub text_channel_id: Option<ChannelId>,
@@ -92,6 +93,7 @@ impl GuildState {
             playback_state: PlaybackState::Idle,
             loop_mode: LoopMode::Off,
             normalize: DEFAULT_NORMALIZE,
+            dj_role: None,
             current_track_handle: None,
             prefetched_source: None,
             text_channel_id: None,
@@ -249,4 +251,10 @@ pub async fn get_pending_searches(
     data.get::<PendingSearches>()
         .cloned()
         .ok_or_else(|| BotError::StateMissing("PendingSearches not found in TypeMap".into()))
+}
+
+pub struct DjRoleManager;
+
+impl TypeMapKey for DjRoleManager {
+    type Value = UserId;
 }

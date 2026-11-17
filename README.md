@@ -11,6 +11,7 @@ Built with [Serenity](https://github.com/serenity-rs/serenity) and [Songbird](ht
 - **Full queue system** -- skip, pause, resume, shuffle, remove, clear
 - **Loop modes** -- off, track, or entire queue
 - **Per-guild isolation** -- each server gets its own queue and settings
+- **Optional DJ role** -- limit the playback controls to one role per server
 - **Optional normalization** -- normalized playback uses ffmpeg + `dynaudnorm`
 - **Redis-backed state writes** -- queue, now-playing, settings, and history persist while the bot is running
 - **Auto-disconnect** -- leaves voice after configurable idle timeout
@@ -34,8 +35,21 @@ Built with [Serenity](https://github.com/serenity-rs/serenity) and [Songbird](ht
 | `/loop <mode>` | Set loop mode: `off`, `track`, or `queue` |
 | `/remove <pos>` | Remove a track by queue position |
 | `/clear` | Clear the queue (keeps current track) |
+| `/normalize [enabled]` | Turn sound normalisation on or off (toggles if omitted) |
+| `/djrole set <role>` | Only let members with this role control playback |
+| `/djrole clear` | Let everyone control playback again |
+| `/djrole show` | Show the current DJ role |
 | `/join` | Join your voice channel |
 | `/leave` | Leave the voice channel |
+
+### DJ role
+
+Playback controls are open by default. After `/djrole set <role>`, members with that role and server managers can use `/skip`, `/pause`, `/resume`, `/stop`, `/shuffle`, `/loop`, `/remove`, `/clear` and `/leave`. Everyone can still use `/play`, `/search`, `/queue`, `/nowplaying`, `/normalize` and `/join`.
+
+- Only the Discord user configured in `DJ_ROLE_MANAGER_ID` can set or clear the role. Anyone can use `/djrole show`.
+- The role is stored in Redis with the other guild settings. Without Redis it resets when the bot goes idle or restarts.
+- If Redis can't be read, the controls stay restricted to Manage Server until the role can be checked again.
+- The check uses the roles Discord sends with each slash command, so it needs no privileged intent.
 
 ## Quick Start
 
@@ -101,7 +115,8 @@ All configuration is via environment variables (`.env` file supported):
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `DISCORD_TOKEN` | Yes | -- | Discord bot token |
-| `REDIS_URL` | No | `redis://127.0.0.1:6379` | Redis connection URL |
+| `REDIS_URL` | No | `redis://127.0.0.1:6379` | Redis connection URL. Set to an empty string to disable Redis. |
+| `DJ_ROLE_MANAGER_ID` | No | unset | Discord user ID allowed to set and clear the DJ role. Updates are disabled when unset. |
 | `POT_SERVER_URL` | No | unset locally / `http://pot-server:4416` in Docker Compose | bgutil PO-token server URL for yt-dlp |
 | `IDLE_TIMEOUT_SECS` | No | `300` | Auto-disconnect timeout (seconds) |
 | `RUST_LOG` | No | `info` | Log level ([tracing](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) format) |
@@ -150,7 +165,7 @@ Hetzner is a separate cluster with its own Resonance manifest. Never update or d
 src/
   main.rs           -- Entry point, client setup, graceful shutdown
   bot.rs            -- Event handler (ready, interactions, reactions)
-  commands/         -- 14 slash command handlers
+  commands/         -- 16 slash command handlers
   player/
     events.rs       -- Songbird track-end handler, auto-advance logic
   queue/

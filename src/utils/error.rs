@@ -1,3 +1,5 @@
+use serenity::model::id::RoleId;
+
 #[derive(Debug, thiserror::Error)]
 #[allow(dead_code)]
 pub enum BotError {
@@ -29,6 +31,14 @@ pub enum BotError {
     FfmpegSetupFailed(String),
     #[error("Stream network failure: {0}")]
     StreamNetwork(String),
+    #[error("DJ role {0} required")]
+    DjOnly(RoleId),
+    #[error("DJ role could not be verified")]
+    DjRoleUnavailable,
+    #[error("DJ role update could not be confirmed")]
+    DjRoleUpdateUnconfirmed,
+    #[error("Only the configured DJ role manager can change the DJ role")]
+    DjRoleManagerOnly,
     #[error("Internal state missing: {0}")]
     StateMissing(String),
     #[error("Redis error: {0}")]
@@ -47,6 +57,11 @@ pub enum BotError {
 pub type BotResult<T> = Result<T, BotError>;
 
 impl BotError {
+    /// True when the command was refused because of who ran it, not because something broke
+    pub fn is_access_denied(&self) -> bool {
+        matches!(self, Self::DjOnly(_) | Self::DjRoleManagerOnly)
+    }
+
     /// Returns a user-friendly short message for embed display
     pub fn user_message(&self) -> String {
         match self {
@@ -73,6 +88,16 @@ impl BotError {
             }
             Self::FfmpegSetupFailed(_) => "ffmpeg could not start playback for this track.".into(),
             Self::StreamNetwork(_) => "The stream connection dropped during playback.".into(),
+            Self::DjOnly(role) => format!("You need the <@&{role}> role to use this command."),
+            Self::DjRoleUnavailable => {
+                "The DJ role could not be checked right now. Try again in a moment.".into()
+            }
+            Self::DjRoleUpdateUnconfirmed => {
+                "The DJ role update could not be confirmed. Check with `/djrole show` before retrying.".into()
+            }
+            Self::DjRoleManagerOnly => {
+                "Only the configured DJ role manager can change this setting.".into()
+            }
             _ => format!("An error occurred: {self}"),
         }
     }

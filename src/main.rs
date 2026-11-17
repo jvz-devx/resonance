@@ -9,6 +9,7 @@ mod youtube;
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use serenity::model::id::UserId;
 use serenity::prelude::*;
 use songbird::SerenityInit;
 use tracing::{error, info, warn};
@@ -37,21 +38,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let redis_url =
         std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
 
+    let dj_role_manager = std::env::var("DJ_ROLE_MANAGER_ID")
+        .ok()
+        .filter(|id| !id.is_empty())
+        .map(|id| {
+            id.parse::<u64>()
+                .ok()
+                .filter(|id| *id != 0)
+                .map(UserId::new)
+                .ok_or("DJ_ROLE_MANAGER_ID must be a nonzero Discord user ID")
+        })
+        .transpose()?;
+
     let idle_timeout_secs: u64 = std::env::var("IDLE_TIMEOUT_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(300);
 
     // Create Redis pool (non-fatal — bot works without Redis, just no persistence)
-    let redis_pool = match state::redis::create_pool(&redis_url) {
-        Ok(pool) => {
-            info!("Redis connection pool created (url: {redis_url})");
-            Some(pool)
-        }
-        Err(e) => {
-            warn!("Failed to create Redis pool: {e}");
-            warn!("Continuing without Redis — queue state will not survive restarts");
-            None
+    let redis_pool = if redis_url.is_empty() {
+        None
+    } else {
+        match state::redis::create_pool(&redis_url) {
+            Ok(pool) => {
+                info!("Redis connection pool created (url: {redis_url})");
+                Some(pool)
+            }
+            Err(e) => {
+                warn!("Failed to create Redis pool: {e}");
+                warn!("Continuing without Redis — queue state will not survive restarts");
+                None
+            }
         }
     };
 
@@ -80,6 +97,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         data.insert::<PendingSearches>(Arc::new(DashMap::new()));
         data.insert::<HttpClientKey>(http_client);
         data.insert::<IdleTimeoutKey>(idle_timeout_secs);
+        if let Some(manager) = dj_role_manager {
+            data.insert::<state::DjRoleManager>(manager);
+        }
         if let Some(pool) = redis_pool {
             data.insert::<RedisPoolKey>(pool);
         }

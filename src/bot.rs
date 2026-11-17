@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use serenity::all::{Context, EventHandler, Interaction, Reaction, Ready};
+use serenity::all::{CommandInteraction, Context, EventHandler, Interaction, Reaction, Ready};
 use serenity::async_trait;
 use serenity::builder::{
     CreateInteractionResponse, CreateInteractionResponseMessage, EditInteractionResponse,
@@ -17,6 +17,7 @@ use crate::player::events::{
 use crate::queue::track::TrackMetadata;
 use crate::state::{self, PlaybackState};
 use crate::utils::embeds;
+use crate::utils::error::BotResult;
 
 pub struct Handler;
 
@@ -80,30 +81,12 @@ impl EventHandler for Handler {
                 command_name, command.user.name, command.guild_id
             );
 
-            let result = match command_name.as_str() {
-                "play" => commands::play::run(&ctx, &command).await,
-                "search" => commands::search::run(&ctx, &command).await,
-                "queue" => commands::queue::run(&ctx, &command).await,
-                "skip" => commands::skip::run(&ctx, &command).await,
-                "pause" => commands::pause::run(&ctx, &command).await,
-                "resume" => commands::resume::run(&ctx, &command).await,
-                "stop" => commands::stop::run(&ctx, &command).await,
-                "nowplaying" => commands::nowplaying::run(&ctx, &command).await,
-                "shuffle" => commands::shuffle::run(&ctx, &command).await,
-                "loop" => commands::loop_cmd::run(&ctx, &command).await,
-                "normalize" => commands::normalize::run(&ctx, &command).await,
-                "remove" => commands::remove::run(&ctx, &command).await,
-                "clear" => commands::clear::run(&ctx, &command).await,
-                "join" => commands::join::run(&ctx, &command).await,
-                "leave" => commands::leave::run(&ctx, &command).await,
-                _ => {
-                    warn!("Unknown command: {command_name}");
-                    Ok(())
+            if let Err(e) = run_command(&ctx, &command).await {
+                if e.is_access_denied() {
+                    info!("Command /{command_name} denied: {e}");
+                } else {
+                    error!("Command /{command_name} error: {e}");
                 }
-            };
-
-            if let Err(e) = result {
-                error!("Command /{command_name} error: {e}");
 
                 // Try to send error as ephemeral response
                 let embed = embeds::error_embed(&e.user_message());
@@ -131,6 +114,33 @@ impl EventHandler for Handler {
     async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
         if let Err(e) = handle_reaction(&ctx, &reaction).await {
             error!("Reaction handler error: {e}");
+        }
+    }
+}
+
+async fn run_command(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
+    commands::djrole::authorize(ctx, command).await?;
+
+    match command.data.name.as_str() {
+        "play" => commands::play::run(ctx, command).await,
+        "search" => commands::search::run(ctx, command).await,
+        "queue" => commands::queue::run(ctx, command).await,
+        "skip" => commands::skip::run(ctx, command).await,
+        "pause" => commands::pause::run(ctx, command).await,
+        "resume" => commands::resume::run(ctx, command).await,
+        "stop" => commands::stop::run(ctx, command).await,
+        "nowplaying" => commands::nowplaying::run(ctx, command).await,
+        "shuffle" => commands::shuffle::run(ctx, command).await,
+        "loop" => commands::loop_cmd::run(ctx, command).await,
+        "normalize" => commands::normalize::run(ctx, command).await,
+        "remove" => commands::remove::run(ctx, command).await,
+        "clear" => commands::clear::run(ctx, command).await,
+        "djrole" => commands::djrole::run(ctx, command).await,
+        "join" => commands::join::run(ctx, command).await,
+        "leave" => commands::leave::run(ctx, command).await,
+        name => {
+            warn!("Unknown command: {name}");
+            Ok(())
         }
     }
 }

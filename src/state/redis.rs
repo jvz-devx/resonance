@@ -1,5 +1,6 @@
 use deadpool_redis::Pool;
 use deadpool_redis::redis::AsyncCommands;
+use serenity::model::id::RoleId;
 use tracing::warn;
 
 use crate::queue::track::TrackMetadata;
@@ -131,6 +132,38 @@ pub async fn save_normalize(pool: &Pool, guild_id: u64, normalize: bool) -> BotR
     Ok(())
 }
 
+/// Save the DJ role, or remove it when `role` is `None`
+pub async fn save_dj_role(pool: &Pool, guild_id: u64, role: Option<RoleId>) -> BotResult<()> {
+    let mut conn = pool.get().await?;
+    let key = settings_key(guild_id);
+    match role {
+        Some(id) => {
+            let _: () = conn.hset(&key, "dj_role", id.get()).await?;
+        }
+        None => {
+            let _: () = conn.hdel(&key, "dj_role").await?;
+        }
+    }
+    Ok(())
+}
+
+/// Load only the dj_role field
+pub async fn load_dj_role(pool: &Pool, guild_id: u64) -> BotResult<Option<RoleId>> {
+    let mut conn = pool.get().await?;
+    let key = settings_key(guild_id);
+    let value: Option<String> = conn.hget(&key, "dj_role").await?;
+    value.as_deref().map(parse_role_id).transpose()
+}
+
+fn parse_role_id(s: &str) -> BotResult<RoleId> {
+    // RoleId::new panics on 0
+    s.parse::<u64>()
+        .ok()
+        .filter(|id| *id != 0)
+        .map(RoleId::new)
+        .ok_or(BotError::DjRoleUnavailable)
+}
+
 /// Guild settings loaded from Redis in a single round trip.
 pub struct GuildSettings {
     pub loop_mode: LoopMode,
@@ -216,4 +249,24 @@ pub fn create_pool(redis_url: &str) -> Result<Pool, String> {
     let cfg = deadpool_redis::Config::from_url(redis_url);
     cfg.create_pool(Some(deadpool_redis::Runtime::Tokio1))
         .map_err(|e| format!("Failed to create Redis pool: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_stored_role_id() {
+        assert_eq!(
+            parse_role_id("987654321098765432").unwrap(),
+            RoleId::new(987654321098765432)
+        );
+    }
+
+    #[test]
+    fn rejects_zero_and_garbage_role_ids() {
+        assert!(parse_role_id("0").is_err());
+        assert!(parse_role_id("").is_err());
+        assert!(parse_role_id("dj").is_err());
+    }
 }
