@@ -44,11 +44,11 @@ Built with [Serenity](https://github.com/serenity-rs/serenity) and [Songbird](ht
 
 ### DJ role
 
-Playback controls are open by default. After `/djrole set <role>`, only members with that role can use `/play`. DJ role holders and server managers can use `/skip`, `/pause`, `/resume`, `/stop`, `/shuffle`, `/loop`, `/remove`, `/clear` and `/leave`. Everyone can still use `/search`, `/queue`, `/nowplaying`, `/normalize` and `/join`.
+Playback controls are open by default. After `/djrole set <role>`, only members with that role can use `/play` and `/search`. DJ role holders and server managers can use `/skip`, `/pause`, `/resume`, `/stop`, `/shuffle`, `/loop`, `/remove`, `/clear` and `/leave`. Everyone can still use `/queue`, `/nowplaying`, `/normalize` and `/join`.
 
 - Only the Discord user configured in `DJ_ROLE_MANAGER_ID` can set or clear the role. Anyone can use `/djrole show`.
 - The role is stored in Redis with the other guild settings. Without Redis it resets when the bot goes idle or restarts.
-- If Redis cannot be read, `/play` is unavailable until the role can be checked again. Server managers can still use the other restricted controls.
+- If Redis cannot be read, `/play` and `/search` are unavailable until the role can be checked again. Server managers can still use the other restricted controls.
 - The check uses the roles Discord sends with each slash command, so it needs no privileged intent.
 
 ## Quick Start

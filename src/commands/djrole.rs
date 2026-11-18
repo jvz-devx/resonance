@@ -11,8 +11,12 @@ use crate::utils::error::{BotError, BotResult};
 
 /// Commands that change playback for everyone in the voice channel
 const DJ_COMMANDS: &[&str] = &[
-    "play", "skip", "pause", "resume", "stop", "shuffle", "loop", "remove", "clear", "leave",
+    "play", "search", "skip", "pause", "resume", "stop", "shuffle", "loop", "remove", "clear",
+    "leave",
 ];
+
+/// Commands that start music. Only the DJ role may use them, server managers included.
+const DJ_ONLY_COMMANDS: &[&str] = &["play", "search"];
 
 const TEMPORARY_NOTE: &str =
     "\n\nRedis is disabled, so this setting resets when the bot goes idle or restarts.";
@@ -32,10 +36,10 @@ fn check_access(dj_role: Option<RoleId>, member_roles: &[RoleId]) -> Access {
     }
 }
 
-/// Server managers bypass the DJ check for controls other than /play.
+/// Server managers bypass the DJ check for controls other than /play and /search.
 /// Uses the permissions Discord sends with the interaction, so no privileged intent is needed.
 fn can_bypass_dj_role(command: &CommandInteraction) -> bool {
-    command.data.name != "play"
+    !DJ_ONLY_COMMANDS.contains(&command.data.name.as_str())
         && command
             .member
             .as_ref()
@@ -106,7 +110,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
             let embed = embeds::success_embed(
                 "DJ Role",
                 &format!(
-                    "Only members with <@&{0}> can use `/play`. Members with <@&{0}> and server managers can use the other playback controls.{note}",
+                    "Only members with <@&{0}> can use `/play` and `/search`. Members with <@&{0}> and server managers can use the other playback controls.{note}",
                     role.id
                 ),
             );
@@ -213,23 +217,30 @@ mod tests {
 
     #[test]
     fn only_control_commands_are_restricted() {
-        for name in [
-            "search",
-            "queue",
-            "nowplaying",
-            "join",
-            "normalize",
-            "djrole",
-        ] {
+        for name in ["queue", "nowplaying", "join", "normalize", "djrole"] {
             assert!(!DJ_COMMANDS.contains(&name), "{name} should stay open");
         }
         for name in [
-            "play", "skip", "stop", "clear", "remove", "shuffle", "loop", "pause", "resume",
-            "leave",
+            "play", "search", "skip", "stop", "clear", "remove", "shuffle", "loop", "pause",
+            "resume", "leave",
         ] {
             assert!(
                 DJ_COMMANDS.contains(&name),
                 "{name} should need the DJ role"
+            );
+        }
+    }
+
+    #[test]
+    fn commands_that_start_music_have_no_manager_bypass() {
+        for name in ["play", "search"] {
+            assert!(DJ_ONLY_COMMANDS.contains(&name), "{name} should be DJ only");
+            assert!(DJ_COMMANDS.contains(&name), "{name} should be restricted");
+        }
+        for name in ["skip", "stop", "pause", "leave"] {
+            assert!(
+                !DJ_ONLY_COMMANDS.contains(&name),
+                "{name} should stay open to server managers"
             );
         }
     }
