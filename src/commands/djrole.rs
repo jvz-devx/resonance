@@ -11,7 +11,7 @@ use crate::utils::error::{BotError, BotResult};
 
 /// Commands that change playback for everyone in the voice channel
 const DJ_COMMANDS: &[&str] = &[
-    "skip", "pause", "resume", "stop", "shuffle", "loop", "remove", "clear", "leave",
+    "play", "skip", "pause", "resume", "stop", "shuffle", "loop", "remove", "clear", "leave",
 ];
 
 const TEMPORARY_NOTE: &str =
@@ -32,14 +32,15 @@ fn check_access(dj_role: Option<RoleId>, member_roles: &[RoleId]) -> Access {
     }
 }
 
-/// Server managers can operate playback regardless of the configured DJ role.
+/// Server managers bypass the DJ check for controls other than /play.
 /// Uses the permissions Discord sends with the interaction, so no privileged intent is needed.
-fn can_manage(command: &CommandInteraction) -> bool {
-    command
-        .member
-        .as_ref()
-        .and_then(|member| member.permissions)
-        .is_some_and(|permissions| permissions.administrator() || permissions.manage_guild())
+fn can_bypass_dj_role(command: &CommandInteraction) -> bool {
+    command.data.name != "play"
+        && command
+            .member
+            .as_ref()
+            .and_then(|member| member.permissions)
+            .is_some_and(|permissions| permissions.administrator() || permissions.manage_guild())
 }
 
 pub async fn authorize(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
@@ -52,7 +53,7 @@ pub async fn authorize(ctx: &Context, command: &CommandInteraction) -> BotResult
         return Ok(());
     };
 
-    if can_manage(command) {
+    if can_bypass_dj_role(command) {
         return Ok(());
     }
 
@@ -105,7 +106,7 @@ pub async fn run(ctx: &Context, command: &CommandInteraction) -> BotResult<()> {
             let embed = embeds::success_embed(
                 "DJ Role",
                 &format!(
-                    "Members with <@&{}> and server managers can use the playback controls.{note}",
+                    "Only members with <@&{0}> can use `/play`. Members with <@&{0}> and server managers can use the other playback controls.{note}",
                     role.id
                 ),
             );
@@ -213,7 +214,6 @@ mod tests {
     #[test]
     fn only_control_commands_are_restricted() {
         for name in [
-            "play",
             "search",
             "queue",
             "nowplaying",
@@ -224,7 +224,8 @@ mod tests {
             assert!(!DJ_COMMANDS.contains(&name), "{name} should stay open");
         }
         for name in [
-            "skip", "stop", "clear", "remove", "shuffle", "loop", "pause", "resume", "leave",
+            "play", "skip", "stop", "clear", "remove", "shuffle", "loop", "pause", "resume",
+            "leave",
         ] {
             assert!(
                 DJ_COMMANDS.contains(&name),
